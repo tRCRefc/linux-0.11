@@ -2,8 +2,8 @@
 #define _CONFIG_H
 
 /*
- * The root-device is no longer hard-coded. You can change the default
- * root-device by changing the line ROOT_DEV = XXX in boot/bootsect.s
+ * The x86-64 UEFI boot path does not yet select a root device. Root-device
+ * configuration will be defined when the block-device path is ported.
  */
 
 /*

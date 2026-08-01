@@ -2,8 +2,8 @@
 
 BUILD_DIR := build/x86_64
 ARCH_DIR := arch/x86_64
-BOOT_DIR := $(ARCH_DIR)/boot
-UEFI_DIR := arch/x86_64/boot/uefi
+BOOT_DIR := boot
+UEFI_DIR := boot/uefi
 KERNEL_DIR := $(ARCH_DIR)/kernel
 INCLUDE_DIR := $(ARCH_DIR)/include
 
