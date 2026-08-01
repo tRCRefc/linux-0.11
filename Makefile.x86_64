@@ -1,0 +1,93 @@
+.DEFAULT_GOAL := all
+
+BUILD_DIR := build/x86_64
+UEFI_DIR := arch/x86_64/boot/uefi
+
+CC := gcc
+LD := ld
+OBJDUMP := objdump
+NM := nm
+QEMU := qemu-system-x86_64
+
+UEFI_OBJ := $(BUILD_DIR)/uefi/main.o
+EFI_IMAGE := $(BUILD_DIR)/BOOTX64.EFI
+ESP_IMAGE := $(BUILD_DIR)/esp.img
+OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
+OVMF_VARS_TEMPLATE := /usr/share/OVMF/OVMF_VARS_4M.fd
+OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
+
+UEFI_CFLAGS := \
+	-m64 \
+	-std=gnu11 \
+	-ffreestanding \
+	-fno-stack-protector \
+	-fno-pic \
+	-fno-pie \
+	-fno-asynchronous-unwind-tables \
+	-fno-unwind-tables \
+	-fno-ident \
+	-fno-builtin \
+	-fno-common \
+	-fcf-protection=none \
+	-mno-red-zone \
+	-mgeneral-regs-only \
+	-maccumulate-outgoing-args \
+	-Wall -Wextra -Werror \
+	-I$(UEFI_DIR)
+
+.PHONY: all image check run clean
+
+all: $(EFI_IMAGE)
+
+$(BUILD_DIR):
+	mkdir -p $@
+
+$(BUILD_DIR)/uefi:
+	mkdir -p $@
+
+$(UEFI_OBJ): $(UEFI_DIR)/main.c $(UEFI_DIR)/efi.h | $(BUILD_DIR)/uefi
+	$(CC) $(UEFI_CFLAGS) -c $< -o $@
+
+$(EFI_IMAGE): $(UEFI_OBJ) | $(BUILD_DIR)
+	$(LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
+		--file-alignment 0x200 --section-alignment 0x1000 --stack 0x10000 \
+		-o $@ $<
+
+$(ESP_IMAGE): $(EFI_IMAGE) | $(BUILD_DIR)
+	rm -f $@
+	truncate -s 64M $@
+	mformat -i $@ -F ::
+	mmd -i $@ ::/EFI
+	mmd -i $@ ::/EFI/BOOT
+	mcopy -i $@ $(EFI_IMAGE) ::/EFI/BOOT/BOOTX64.EFI
+	mdir -i $@ ::/EFI/BOOT
+
+$(OVMF_VARS): $(OVMF_VARS_TEMPLATE) | $(BUILD_DIR)
+	cp $< $@
+
+image: $(ESP_IMAGE)
+
+check: $(EFI_IMAGE)
+	file $(EFI_IMAGE)
+	$(OBJDUMP) -f $(EFI_IMAGE)
+	$(OBJDUMP) -x $(EFI_IMAGE)
+	$(NM) -u $(UEFI_OBJ)
+	@file $(EFI_IMAGE) | grep -q 'PE32+ executable (EFI application) x86-64'
+	@$(OBJDUMP) -f $(EFI_IMAGE) | grep -q 'file format pei-x86-64'
+	@$(OBJDUMP) -f $(EFI_IMAGE) | grep -q 'architecture: i386:x86-64'
+	@$(OBJDUMP) -x $(EFI_IMAGE) | grep -q 'Subsystem[[:space:]]*0000000a'
+	@$(OBJDUMP) -x $(EFI_IMAGE) | grep -Eq 'AddressOfEntryPoint[[:space:]]+[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*'
+	@test -z "$$($(NM) -u $(UEFI_OBJ))"
+	@! grep -nE '\.code16|\.code32|int[[:space:]]+\$?0x(10|13)|multiboot|grub|limine' \
+		$(UEFI_DIR)/efi.h $(UEFI_DIR)/main.c
+
+run: image $(OVMF_VARS)
+	$(QEMU) \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
+		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
+		-drive format=raw,file=$(ESP_IMAGE) \
+		-serial stdio -display none -monitor none -no-reboot -no-shutdown
+
+clean:
+	test "$(BUILD_DIR)" = "build/x86_64"
+	rm -rf -- "$(BUILD_DIR)"
