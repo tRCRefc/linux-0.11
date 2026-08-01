@@ -5,8 +5,9 @@
 static efi_char16_t console_message[] = {
     'L', 'i', 'n', 'u', 'x', ' ', '0', '.', '1', '1', ' ',
     'x', '8', '6', '-', '6', '4', ':', ' ',
-    'e', 'f', 'i', '_', 'm', 'a', 'i', 'n', ' ',
-    'r', 'e', 'a', 'c', 'h', 'e', 'd', '\r', '\n', 0
+    'U', 'E', 'F', 'I', ' ', 'c', 'o', 'n', 's', 'o', 'l', 'e', ' ',
+    'i', 's', ' ', 'a', 'v', 'a', 'i', 'l', 'a', 'b', 'l', 'e',
+    '\r', '\n', 0
 };
 
 static inline void outb(efi_uint16_t port, efi_uint8_t value)

@@ -7,6 +7,7 @@ CC := gcc
 LD := ld
 OBJDUMP := objdump
 NM := nm
+READELF := readelf
 QEMU := qemu-system-x86_64
 
 UEFI_OBJ := $(BUILD_DIR)/uefi/main.o
@@ -21,8 +22,7 @@ UEFI_CFLAGS := \
 	-std=gnu11 \
 	-ffreestanding \
 	-fno-stack-protector \
-	-fno-pic \
-	-fno-pie \
+	-fpic \
 	-fno-asynchronous-unwind-tables \
 	-fno-unwind-tables \
 	-fno-ident \
@@ -72,14 +72,15 @@ check: $(EFI_IMAGE)
 	$(OBJDUMP) -f $(EFI_IMAGE)
 	$(OBJDUMP) -x $(EFI_IMAGE)
 	$(NM) -u $(UEFI_OBJ)
+	$(READELF) -r $(UEFI_OBJ)
 	@file $(EFI_IMAGE) | grep -q 'PE32+ executable (EFI application) x86-64'
 	@$(OBJDUMP) -f $(EFI_IMAGE) | grep -q 'file format pei-x86-64'
 	@$(OBJDUMP) -f $(EFI_IMAGE) | grep -q 'architecture: i386:x86-64'
 	@$(OBJDUMP) -x $(EFI_IMAGE) | grep -q 'Subsystem[[:space:]]*0000000a'
 	@$(OBJDUMP) -x $(EFI_IMAGE) | grep -Eq 'AddressOfEntryPoint[[:space:]]+[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*'
 	@test -z "$$($(NM) -u $(UEFI_OBJ))"
-	@! grep -nE '\.code16|\.code32|int[[:space:]]+\$?0x(10|13)|multiboot|grub|limine' \
-		$(UEFI_DIR)/efi.h $(UEFI_DIR)/main.c
+	@! $(READELF) -r $(UEFI_OBJ) | \
+		grep -Eq 'R_X86_64_(32|32S)([[:space:]]|$$)'
 
 run: image $(OVMF_VARS)
 	$(QEMU) \
