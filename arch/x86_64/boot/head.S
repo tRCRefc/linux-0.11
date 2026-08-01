@@ -2,16 +2,26 @@
 	.equ KERNEL_DS, 0x10
 	.equ IDT_GATE_COUNT, 256
 	.equ IDT_GATE_SIZE, 16
+	.equ PAGE_SIZE, 4096
+	.equ PAGE_TABLE_PAGES, 6
+	.equ PAGE_DIRECTORY_COUNT, 4
+	.equ LARGE_PAGE_COUNT, 2048
+	.equ PAGE_PRESENT_WRITE, 0x003
+	.equ LARGE_PAGE_FLAGS, 0x083
+	.equ CR0_WRITE_PROTECT, 0x00010000
+	.equ CR4_PAGE_GLOBAL, 0x00000080
 
 	.text
 	.globl x86_64_start
 	.type x86_64_start, @function
 x86_64_start:
 	cli
+	cld
 	movq %rdi, %r12
 	leaq boot_stack_top(%rip), %rsp
 	andq $-16, %rsp
 	xorq %rbp, %rbp
+	call load_page_tables
 	call load_gdt
 	call load_idt
 	movq %r12, %rdi
@@ -21,6 +31,66 @@ x86_64_start:
 	hlt
 	jmp 1b
 	.size x86_64_start, .-x86_64_start
+
+	.type load_page_tables, @function
+load_page_tables:
+	leaq x86_64_start(%rip), %rax
+	shrq $32, %rax
+	jnz page_table_failure
+	leaq boot_stack_top - 1(%rip), %rax
+	shrq $32, %rax
+	jnz page_table_failure
+	leaq early_page_tables_end - 1(%rip), %rax
+	shrq $32, %rax
+	jnz page_table_failure
+
+	leaq early_pml4(%rip), %rdi
+	xorl %eax, %eax
+	movl $(PAGE_TABLE_PAGES * PAGE_SIZE / 8), %ecx
+	rep stosq
+
+	leaq early_page_directories(%rip), %rdi
+	movq $LARGE_PAGE_FLAGS, %rax
+	movl $LARGE_PAGE_COUNT, %ecx
+1:
+	movq %rax, 0(%rdi)
+	addq $0x200000, %rax
+	addq $8, %rdi
+	decl %ecx
+	jne 1b
+
+	leaq early_page_directories(%rip), %rax
+	leaq early_pdpt(%rip), %rdi
+	movl $PAGE_DIRECTORY_COUNT, %ecx
+2:
+	movq %rax, %rdx
+	orq $PAGE_PRESENT_WRITE, %rdx
+	movq %rdx, 0(%rdi)
+	addq $PAGE_SIZE, %rax
+	addq $8, %rdi
+	decl %ecx
+	jne 2b
+
+	leaq early_pdpt(%rip), %rax
+	orq $PAGE_PRESENT_WRITE, %rax
+	movq %rax, early_pml4(%rip)
+
+	leaq early_pml4(%rip), %rax
+	movq %rax, %cr3
+	movq %cr4, %rax
+	andq $-129, %rax
+	movq %rax, %cr4
+	movq %cr0, %rax
+	orq $CR0_WRITE_PROTECT, %rax
+	movq %rax, %cr0
+	ret
+	.size load_page_tables, .-load_page_tables
+
+page_table_failure:
+	cli
+1:
+	hlt
+	jmp 1b
 
 	.type load_gdt, @function
 load_gdt:
@@ -100,5 +170,14 @@ early_idt:
 boot_stack:
 	.skip 16384
 boot_stack_top:
+
+	.balign PAGE_SIZE
+early_pml4:
+	.skip PAGE_SIZE
+early_pdpt:
+	.skip PAGE_SIZE
+early_page_directories:
+	.skip PAGE_DIRECTORY_COUNT * PAGE_SIZE
+early_page_tables_end:
 
 	.section .note.GNU-stack,"",@progbits
