@@ -49,8 +49,8 @@ _start:
 	mov	ax,#INITSEG
 	mov	es,ax
 	mov	cx,#256
-	sub	si,si
-	sub	di,di
+	xor	si,si
+	xor	di,di
 	rep
 	movw
 	jmpi	go,INITSEG
