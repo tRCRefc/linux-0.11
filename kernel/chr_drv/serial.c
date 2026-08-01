@@ -1,74 +1,82 @@
-/*
- *  linux/kernel/serial.c
- *
- *  (C) 1991  Linus Torvalds
- */
+#include <asm/serial.h>
 
-/*
- *	serial.c
- *
- * This module implements the rs232 io functions
- *	void rs_write(struct tty_struct * queue);
- *	void rs_init(void);
- * and all interrupts pertaining to serial IO.
- */
+#define COM1_PORT 0x3f8
 
-#include <linux/tty.h>
-#include <linux/sched.h>
-#include <asm/system.h>
-#include <asm/io.h>
-
-#define WAKEUP_CHARS (TTY_BUF_SIZE/4)
-
-extern void rs1_interrupt(void);
-extern void rs2_interrupt(void);
-
-// 初始化串行端口
-// 设置指定串行端口的传输波特率(2400bps)并允许除了写保持寄存器空以为的所有中断源。
-// 另外，在输出2字节的波特率因子时，须首先设置线路控制寄存器DLAB位(位7).
-// 参数：port是串行端口基地址，串口1 - 0x3F8; 串口2 - 0x2F8
-static void init(int port)
+static inline void outb(__UINT16_TYPE__ port, __UINT8_TYPE__ value)
 {
-    // 设置线路控制寄存器的DLAB位(位7)
-	outb_p(0x80,port+3);	/* set DLAB of line control reg */
-    // 发送波特率因子低字节，0x30 -> 2400bps
-	outb_p(0x30,port);	/* LS of divisor (48 -> 2400 bps */
-    // 发送波特率因子高字节，0x00
-	outb_p(0x00,port+1);	/* MS of divisor */
-    // 复位DLAB位,数据位为8位
-	outb_p(0x03,port+3);	/* reset DLAB */
-    // 设置DTR,RTS,辅助用户输出2
-	outb_p(0x0b,port+4);	/* set DTR,RTS, OUT_2 */
-    // 除了写(写保持空)以外，允许所有中断源中断
-	outb_p(0x0d,port+1);	/* enable all intrs but writes */
-    // 读数据口，以进行复位操作(?)
-	(void)inb(port);	/* read data port to reset things (?) */
+    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
-// 初始化串行中断程序和串行接口
-// 中断描述符表IDT中的门描述符设置宏set_intr_gate()在include/asm/system.h中实现
-void rs_init(void)
+static inline __UINT8_TYPE__ inb(__UINT16_TYPE__ port)
 {
-    // 下面两句用于设置两个串行口的中断门描述符。rsl_interrupt是串口1的中断处理过程指正。
-    // 串口1使用的中断是int 0x24，串口2的是int 0x23.
-	set_intr_gate(0x24,rs1_interrupt);      // 设置串行口1的中断门向量(IRQ4信号)
-	set_intr_gate(0x23,rs2_interrupt);      // 设置串行口2的中断门向量(IRQ3信号)
-	init(tty_table[1].read_q.data);         // 初始化串行口1(.data是端口基地址)
-	init(tty_table[2].read_q.data);         // 初始化串行口2
-	outb(inb_p(0x21)&0xE7,0x21);            // 允许主8259A响应IRQ3、IRQ4中断请求
+    __UINT8_TYPE__ value;
+
+    __asm__ volatile ("inb %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
 }
 
-/*
- * This routine gets called when tty_write has put something into
- * the write_queue. It must check wheter the queue is empty, and
- * set the interrupt register accordingly
- *
- *	void _rs_write(struct tty_struct * tty);
- */
-void rs_write(struct tty_struct * tty)
+void serial_init(void)
 {
-	cli();
-	if (!EMPTY(tty->write_q))
-		outb(inb_p(tty->write_q.data+1)|0x02,tty->write_q.data+1);
-	sti();
+    outb((__UINT16_TYPE__)(COM1_PORT + 1), 0x00);
+    outb((__UINT16_TYPE__)(COM1_PORT + 3), 0x80);
+    outb((__UINT16_TYPE__)(COM1_PORT + 0), 0x03);
+    outb((__UINT16_TYPE__)(COM1_PORT + 1), 0x00);
+    outb((__UINT16_TYPE__)(COM1_PORT + 3), 0x03);
+    outb((__UINT16_TYPE__)(COM1_PORT + 2), 0xc7);
+    outb((__UINT16_TYPE__)(COM1_PORT + 4), 0x0b);
+}
+
+static int serial_transmit_ready(void)
+{
+    __UINT32_TYPE__ attempts;
+
+    for (attempts = 0; attempts < 1000000; ++attempts) {
+        if ((inb((__UINT16_TYPE__)(COM1_PORT + 5)) & 0x20) != 0)
+            return 1;
+    }
+
+    return 0;
+}
+
+static void serial_putc(char value)
+{
+    if (serial_transmit_ready())
+        outb((__UINT16_TYPE__)COM1_PORT, (__UINT8_TYPE__)value);
+}
+
+void serial_write(const char *text)
+{
+    while (*text != '\0') {
+        serial_putc(*text);
+        ++text;
+    }
+}
+
+void serial_write_uint64(__UINT64_TYPE__ value)
+{
+    char digits[20];
+    __UINTPTR_TYPE__ count = 0;
+
+    if (value == 0) {
+        serial_putc('0');
+        return;
+    }
+
+    while (value != 0) {
+        digits[count++] = (char)('0' + value % 10);
+        value /= 10;
+    }
+
+    while (count != 0)
+        serial_putc(digits[--count]);
+}
+
+void serial_write_hex64(__UINT64_TYPE__ value)
+{
+    static const char digits[] = "0123456789abcdef";
+    int shift;
+
+    serial_write("0x");
+    for (shift = 60; shift >= 0; shift -= 4)
+        serial_putc(digits[(value >> shift) & 0xf]);
 }

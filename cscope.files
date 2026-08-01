@@ -1,10 +1,8 @@
 ./boot/head.S
 ./boot/uefi/efi.h
 ./boot/uefi/main.c
-./arch/x86_64/include/asm/boot.h
-./arch/x86_64/include/asm/serial.h
-./arch/x86_64/kernel/main.c
-./arch/x86_64/kernel/serial.c
+./include/asm/boot.h
+./include/asm/serial.h
 ./fs/file_dev.c
 ./fs/exec.c
 ./fs/namei.c
