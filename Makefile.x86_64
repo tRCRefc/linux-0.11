@@ -1,7 +1,11 @@
 .DEFAULT_GOAL := all
 
 BUILD_DIR := build/x86_64
+ARCH_DIR := arch/x86_64
+BOOT_DIR := $(ARCH_DIR)/boot
 UEFI_DIR := arch/x86_64/boot/uefi
+KERNEL_DIR := $(ARCH_DIR)/kernel
+INCLUDE_DIR := $(ARCH_DIR)/include
 
 CC := gcc
 LD := ld
@@ -11,13 +15,17 @@ READELF := readelf
 QEMU := qemu-system-x86_64
 
 UEFI_OBJ := $(BUILD_DIR)/uefi/main.o
+HEAD_OBJ := $(BUILD_DIR)/boot/head.o
+KERNEL_OBJ := $(BUILD_DIR)/kernel/main.o
+SERIAL_OBJ := $(BUILD_DIR)/kernel/serial.o
+EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(KERNEL_OBJ) $(SERIAL_OBJ)
 EFI_IMAGE := $(BUILD_DIR)/BOOTX64.EFI
 ESP_IMAGE := $(BUILD_DIR)/esp.img
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS_TEMPLATE := /usr/share/OVMF/OVMF_VARS_4M.fd
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
 
-UEFI_CFLAGS := \
+X86_64_CFLAGS := \
 	-m64 \
 	-std=gnu11 \
 	-ffreestanding \
@@ -33,7 +41,15 @@ UEFI_CFLAGS := \
 	-mgeneral-regs-only \
 	-maccumulate-outgoing-args \
 	-Wall -Wextra -Werror \
-	-I$(UEFI_DIR)
+	-I$(UEFI_DIR) \
+	-I$(INCLUDE_DIR)
+
+X86_64_ASFLAGS := \
+	-m64 \
+	-ffreestanding \
+	-fpic \
+	-mno-red-zone \
+	-I$(INCLUDE_DIR)
 
 .PHONY: all image check run clean
 
@@ -45,13 +61,30 @@ $(BUILD_DIR):
 $(BUILD_DIR)/uefi:
 	mkdir -p $@
 
-$(UEFI_OBJ): $(UEFI_DIR)/main.c $(UEFI_DIR)/efi.h | $(BUILD_DIR)/uefi
-	$(CC) $(UEFI_CFLAGS) -c $< -o $@
+$(BUILD_DIR)/boot:
+	mkdir -p $@
 
-$(EFI_IMAGE): $(UEFI_OBJ) | $(BUILD_DIR)
+$(BUILD_DIR)/kernel:
+	mkdir -p $@
+
+$(UEFI_OBJ): $(UEFI_DIR)/main.c $(UEFI_DIR)/efi.h \
+		$(INCLUDE_DIR)/asm/boot.h $(INCLUDE_DIR)/asm/serial.h | $(BUILD_DIR)/uefi
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
+$(HEAD_OBJ): $(BOOT_DIR)/head.S | $(BUILD_DIR)/boot
+	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
+
+$(KERNEL_OBJ): $(KERNEL_DIR)/main.c $(INCLUDE_DIR)/asm/boot.h \
+		$(INCLUDE_DIR)/asm/serial.h | $(BUILD_DIR)/kernel
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
+$(SERIAL_OBJ): $(KERNEL_DIR)/serial.c $(INCLUDE_DIR)/asm/serial.h | $(BUILD_DIR)/kernel
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
+$(EFI_IMAGE): $(EFI_OBJS) | $(BUILD_DIR)
 	$(LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
 		--file-alignment 0x200 --section-alignment 0x1000 --stack 0x10000 \
-		-o $@ $<
+		-o $@ $(EFI_OBJS)
 
 $(ESP_IMAGE): $(EFI_IMAGE) | $(BUILD_DIR)
 	rm -f $@
@@ -71,15 +104,15 @@ check: $(EFI_IMAGE)
 	file $(EFI_IMAGE)
 	$(OBJDUMP) -f $(EFI_IMAGE)
 	$(OBJDUMP) -x $(EFI_IMAGE)
-	$(NM) -u $(UEFI_OBJ)
-	$(READELF) -r $(UEFI_OBJ)
+	$(NM) -u $(EFI_IMAGE)
+	$(READELF) -r $(EFI_OBJS)
 	@file $(EFI_IMAGE) | grep -q 'PE32+ executable (EFI application) x86-64'
 	@$(OBJDUMP) -f $(EFI_IMAGE) | grep -q 'file format pei-x86-64'
 	@$(OBJDUMP) -f $(EFI_IMAGE) | grep -q 'architecture: i386:x86-64'
 	@$(OBJDUMP) -x $(EFI_IMAGE) | grep -q 'Subsystem[[:space:]]*0000000a'
 	@$(OBJDUMP) -x $(EFI_IMAGE) | grep -Eq 'AddressOfEntryPoint[[:space:]]+[0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*'
-	@test -z "$$($(NM) -u $(UEFI_OBJ))"
-	@! $(READELF) -r $(UEFI_OBJ) | \
+	@test -z "$$($(NM) -u $(EFI_IMAGE))"
+	@! $(READELF) -r $(EFI_OBJS) | \
 		grep -Eq 'R_X86_64_(32|32S)([[:space:]]|$$)'
 
 run: image $(OVMF_VARS)

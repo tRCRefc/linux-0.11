@@ -1,6 +1,7 @@
 #include "efi.h"
+#include <asm/boot.h>
+#include <asm/serial.h>
 
-#define COM1_PORT 0x3f8
 #define MEMORY_MAP_EXTRA_DESCRIPTORS 8
 #define MEMORY_MAP_MAX_ATTEMPTS 4
 #define EXIT_BOOT_SERVICES_MAX_ATTEMPTS 4
@@ -14,6 +15,11 @@ struct boot_memory_map {
     efi_uint32_t descriptor_version;
 };
 
+static struct boot_info kernel_boot_info;
+
+void __attribute__((noreturn))
+x86_64_start(const struct boot_info *boot_info);
+
 static efi_char16_t console_message[] = {
     'L', 'i', 'n', 'u', 'x', ' ', '0', '.', '1', '1', ' ',
     'x', '8', '6', '-', '6', '4', ':', ' ',
@@ -21,85 +27,6 @@ static efi_char16_t console_message[] = {
     'i', 's', ' ', 'a', 'v', 'a', 'i', 'l', 'a', 'b', 'l', 'e',
     '\r', '\n', 0
 };
-
-static inline void outb(efi_uint16_t port, efi_uint8_t value)
-{
-    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
-}
-
-static inline efi_uint8_t inb(efi_uint16_t port)
-{
-    efi_uint8_t value;
-
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "Nd"(port));
-    return value;
-}
-
-static void serial_init(void)
-{
-    outb((efi_uint16_t)(COM1_PORT + 1), 0x00);
-    outb((efi_uint16_t)(COM1_PORT + 3), 0x80);
-    outb((efi_uint16_t)(COM1_PORT + 0), 0x03);
-    outb((efi_uint16_t)(COM1_PORT + 1), 0x00);
-    outb((efi_uint16_t)(COM1_PORT + 3), 0x03);
-    outb((efi_uint16_t)(COM1_PORT + 2), 0xc7);
-    outb((efi_uint16_t)(COM1_PORT + 4), 0x0b);
-}
-
-static int serial_transmit_ready(void)
-{
-    efi_uint32_t attempts;
-
-    for (attempts = 0; attempts < 1000000; ++attempts) {
-        if ((inb((efi_uint16_t)(COM1_PORT + 5)) & 0x20) != 0)
-            return 1;
-    }
-
-    return 0;
-}
-
-static void serial_putc(char value)
-{
-    if (serial_transmit_ready())
-        outb((efi_uint16_t)COM1_PORT, (efi_uint8_t)value);
-}
-
-static void serial_write(const char *text)
-{
-    while (*text != '\0') {
-        serial_putc(*text);
-        ++text;
-    }
-}
-
-static void serial_write_uint64(efi_uint64_t value)
-{
-    char digits[20];
-    efi_uintn_t count = 0;
-
-    if (value == 0) {
-        serial_putc('0');
-        return;
-    }
-
-    while (value != 0) {
-        digits[count++] = (char)('0' + value % 10);
-        value /= 10;
-    }
-
-    while (count != 0)
-        serial_putc(digits[--count]);
-}
-
-static void serial_write_hex64(efi_uint64_t value)
-{
-    static const char digits[] = "0123456789abcdef";
-    int shift;
-
-    serial_write("0x");
-    for (shift = 60; shift >= 0; shift -= 4)
-        serial_putc(digits[(value >> shift) & 0xf]);
-}
 
 static efi_status_t release_memory_map(
     struct efi_boot_services *boot_services,
@@ -229,14 +156,19 @@ static efi_status_t leave_boot_services(
     return EFI_INVALID_PARAMETER;
 }
 
-static __attribute__((noreturn)) void halt_after_boot_services(void)
+static __attribute__((noreturn)) void handoff_to_kernel(
+    const struct boot_memory_map *memory_map)
 {
     __asm__ volatile ("cli" : : : "memory");
-    serial_write("UEFI boot services exited\r\n");
-    serial_write("Kernel takeover point reached\r\n");
 
-    for (;;)
-        __asm__ volatile ("hlt");
+    kernel_boot_info.memory_map = memory_map->descriptors;
+    kernel_boot_info.memory_map_size = memory_map->size;
+    kernel_boot_info.memory_descriptor_size = memory_map->descriptor_size;
+    kernel_boot_info.memory_descriptor_version =
+        memory_map->descriptor_version;
+
+    serial_write("UEFI boot services exited\r\n");
+    x86_64_start(&kernel_boot_info);
 }
 
 efi_status_t EFIAPI efi_main(efi_handle_t image_handle,
@@ -282,5 +214,5 @@ efi_status_t EFIAPI efi_main(efi_handle_t image_handle,
         return status;
     }
 
-    halt_after_boot_services();
+    handoff_to_kernel(&memory_map);
 }
