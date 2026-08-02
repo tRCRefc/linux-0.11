@@ -42,3 +42,29 @@ unsigned long nr_free_pages(void)
 
     return free_pages;
 }
+
+unsigned long get_free_page(void)
+{
+    unsigned long index = PAGING_PAGES;
+
+    while (index > 0) {
+        unsigned long *word;
+        unsigned long page;
+        unsigned long words;
+
+        --index;
+        if (mem_map[index] != 0)
+            continue;
+
+        mem_map[index] = 1;
+        page = low_memory + index * PAGE_SIZE;
+        word = (unsigned long *)page;
+        words = PAGE_SIZE / sizeof(*word);
+        while (words-- > 0)
+            *word++ = 0;
+
+        return page;
+    }
+
+    return 0;
+}
