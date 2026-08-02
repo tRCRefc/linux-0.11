@@ -2,13 +2,13 @@
 #define X86_64_ASM_BOOT_H
 
 struct boot_info {
-    void *memory_map;
-    __UINT64_TYPE__ memory_map_size;
-    __UINT64_TYPE__ memory_descriptor_size;
-    __UINT32_TYPE__ memory_descriptor_version;
+    __UINT64_TYPE__ memory_start;
+    __UINT64_TYPE__ memory_end;
 };
 
-_Static_assert(sizeof(struct boot_info) == 32,
+_Static_assert(sizeof(struct boot_info) == 16,
                "unexpected x86-64 boot info layout");
+_Static_assert(__builtin_offsetof(struct boot_info, memory_end) == 8,
+               "unexpected x86-64 memory end offset");
 
 #endif

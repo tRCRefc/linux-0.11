@@ -5,6 +5,10 @@
 #define MEMORY_MAP_EXTRA_DESCRIPTORS 8
 #define MEMORY_MAP_MAX_ATTEMPTS 4
 #define EXIT_BOOT_SERVICES_MAX_ATTEMPTS 4
+#define PAGE_SIZE 4096
+#define LOW_MEMORY 0x100000ULL
+#define EARLY_MEMORY_LIMIT 0x100000000ULL
+#define MANAGED_MEMORY_MAX_PAGES 3840
 
 struct boot_memory_map {
     struct efi_memory_descriptor *descriptors;
@@ -159,15 +163,68 @@ static efi_status_t leave_boot_services(
 static __attribute__((noreturn)) void handoff_to_kernel(
     const struct boot_memory_map *memory_map)
 {
+    efi_uint64_t best_start = 0;
+    efi_uint64_t best_pages = 0;
+    efi_uintn_t entry_count;
+    efi_uintn_t entry;
+
     __asm__ volatile ("cli" : : : "memory");
 
-    kernel_boot_info.memory_map = memory_map->descriptors;
-    kernel_boot_info.memory_map_size = memory_map->size;
-    kernel_boot_info.memory_descriptor_size = memory_map->descriptor_size;
-    kernel_boot_info.memory_descriptor_version =
-        memory_map->descriptor_version;
+    entry_count = memory_map->size / memory_map->descriptor_size;
+    for (entry = 0; entry < entry_count; ++entry) {
+        struct efi_memory_descriptor *descriptor;
+        efi_uint64_t start;
+        efi_uint64_t pages;
+        efi_uint64_t skipped_pages;
+        efi_uint64_t pages_below_limit;
+
+        descriptor = (struct efi_memory_descriptor *)(
+            (efi_uint8_t *)memory_map->descriptors +
+            entry * memory_map->descriptor_size);
+        if (descriptor->type != EFI_CONVENTIONAL_MEMORY)
+            continue;
+
+        start = descriptor->physical_start;
+        pages = descriptor->number_of_pages;
+        if (start >= EARLY_MEMORY_LIMIT || pages == 0)
+            continue;
+
+        pages_below_limit = (EARLY_MEMORY_LIMIT - start) / PAGE_SIZE;
+        if (pages > pages_below_limit)
+            pages = pages_below_limit;
+
+        if (start < LOW_MEMORY) {
+            skipped_pages = (LOW_MEMORY - start + PAGE_SIZE - 1) /
+                            PAGE_SIZE;
+            if (skipped_pages >= pages)
+                continue;
+            start += skipped_pages * PAGE_SIZE;
+            pages -= skipped_pages;
+        }
+
+        if (pages > best_pages) {
+            best_start = start;
+            best_pages = pages;
+        }
+    }
+
+    if (best_pages > MANAGED_MEMORY_MAX_PAGES)
+        best_pages = MANAGED_MEMORY_MAX_PAGES;
+    if (best_pages == 0) {
+        serial_write("UEFI found no suitable main memory\r\n");
+        for (;;)
+            __asm__ volatile ("hlt");
+    }
+
+    kernel_boot_info.memory_start = best_start;
+    kernel_boot_info.memory_end = best_start + best_pages * PAGE_SIZE;
 
     serial_write("UEFI boot services exited\r\n");
+    serial_write("UEFI selected main memory: ");
+    serial_write_hex64(kernel_boot_info.memory_start);
+    serial_write(" - ");
+    serial_write_hex64(kernel_boot_info.memory_end);
+    serial_write("\r\n");
     x86_64_start(&kernel_boot_info);
 }
 
