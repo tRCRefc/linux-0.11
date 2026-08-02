@@ -5,6 +5,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/kernel.h>
 
 #define PAGING_MEMORY (15UL * 1024 * 1024)
 #define PAGING_PAGES (PAGING_MEMORY / PAGE_SIZE)
@@ -67,4 +68,21 @@ unsigned long get_free_page(void)
     }
 
     return 0;
+}
+
+void free_page(unsigned long address)
+{
+    unsigned long index;
+
+    if (address < low_memory)
+        return;
+    if (address >= high_memory ||
+        (address & (PAGE_SIZE - 1)) != 0)
+        panic("trying to free nonexistent page");
+
+    index = (address - low_memory) / PAGE_SIZE;
+    if (mem_map[index] == 0)
+        panic("trying to free free page");
+
+    --mem_map[index];
 }
