@@ -11,8 +11,8 @@
 #define PAGING_PAGES (PAGING_MEMORY / PAGE_SIZE)
 #define USED 100
 
-static unsigned long low_memory;
-static unsigned long high_memory;
+static unsigned long low_mem;
+static unsigned long high_mem;
 static unsigned char mem_map[PAGING_PAGES];
 
 void mem_init(unsigned long start_mem, unsigned long end_mem)
@@ -20,13 +20,13 @@ void mem_init(unsigned long start_mem, unsigned long end_mem)
     unsigned long i;
     unsigned long pages;
 
-    low_memory = start_mem;
-    high_memory = end_mem;
+    low_mem = start_mem;
+    high_mem = end_mem;
 
     for (i = 0; i < PAGING_PAGES; ++i)
         mem_map[i] = USED;
 
-    pages = (high_memory - low_memory) / PAGE_SIZE;
+    pages = (high_mem - low_mem) / PAGE_SIZE;
     for (i = 0; i < pages; ++i)
         mem_map[i] = 0;
 }
@@ -34,14 +34,14 @@ void mem_init(unsigned long start_mem, unsigned long end_mem)
 unsigned long nr_free_pages(void)
 {
     unsigned long i;
-    unsigned long free_pages = 0;
+    unsigned long free = 0;
 
     for (i = 0; i < PAGING_PAGES; ++i) {
         if (mem_map[i] == 0)
-            ++free_pages;
+            ++free;
     }
 
-    return free_pages;
+    return free;
 }
 
 unsigned long get_free_page(void)
@@ -58,7 +58,7 @@ unsigned long get_free_page(void)
             continue;
 
         mem_map[index] = 1;
-        page = low_memory + index * PAGE_SIZE;
+        page = low_mem + index * PAGE_SIZE;
         word = (unsigned long *)page;
         words = PAGE_SIZE / sizeof(*word);
         while (words-- > 0)
@@ -74,13 +74,13 @@ void free_page(unsigned long address)
 {
     unsigned long index;
 
-    if (address < low_memory)
+    if (address < low_mem)
         return;
-    if (address >= high_memory ||
+    if (address >= high_mem ||
         (address & (PAGE_SIZE - 1)) != 0)
         panic("trying to free nonexistent page");
 
-    index = (address - low_memory) / PAGE_SIZE;
+    index = (address - low_mem) / PAGE_SIZE;
     if (mem_map[index] == 0)
         panic("trying to free free page");
 
