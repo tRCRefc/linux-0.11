@@ -11,6 +11,12 @@
 #define PAGING_PAGES (PAGING_MEMORY / PAGE_SIZE)
 #define USED 100
 
+#define PAGE_PRESENT 0x001UL
+#define PAGE_SIZE_FLAG 0x080UL
+#define PAGE_TABLE_ADDR_MASK 0x000ffffffffff000UL
+#define LARGE_PAGE_ADDR_MASK 0x000fffffffe00000UL
+#define LARGE_PAGE_OFFSET 0x001fffffUL
+
 static unsigned long low_mem;
 static unsigned long high_mem;
 static unsigned char mem_map[PAGING_PAGES];
@@ -85,4 +91,43 @@ void free_page(unsigned long address)
         panic("trying to free free page");
 
     --mem_map[index];
+}
+
+int resolve_addr(unsigned long va, unsigned long *pa)
+{
+    unsigned long cr3;
+    unsigned long *pml4;
+    unsigned long *pdpt;
+    unsigned long *pd;
+    unsigned long *pt;
+    unsigned long pml4e;
+    unsigned long pdpte;
+    unsigned long pde;
+    unsigned long pte;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+
+    pml4 = (unsigned long *)(cr3 & PAGE_TABLE_ADDR_MASK);
+    pml4e = pml4[(va >> 39) & 0x1ffUL];
+    if (!(pml4e & PAGE_PRESENT)) return 0;
+
+    pdpt = (unsigned long *)(pml4e & PAGE_TABLE_ADDR_MASK);
+    pdpte = pdpt[(va >> 30) & 0x1ffUL];
+    if (!(pdpte & PAGE_PRESENT)) return 0;
+    if (pdpte & PAGE_SIZE_FLAG) return 0;
+
+    pd = (unsigned long *)(pdpte & PAGE_TABLE_ADDR_MASK);
+    pde = pd[(va >> 21) & 0x1ffUL];
+    if (!(pde & PAGE_PRESENT)) return 0;
+    if (pde & PAGE_SIZE_FLAG) {
+        *pa = ((pde & LARGE_PAGE_ADDR_MASK) | (va & LARGE_PAGE_OFFSET));
+        return 1;
+    } else {
+        pt = (unsigned long *)(pde & PAGE_TABLE_ADDR_MASK);
+        pte = pt[(va >> 12) & 0x1ffUL];
+        if (!(pte & PAGE_PRESENT)) return 0;
+
+        *pa = ((pte & PAGE_TABLE_ADDR_MASK) | (va & (PAGE_SIZE - 1UL)));
+        return 1;
+    }
 }
