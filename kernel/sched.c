@@ -10,6 +10,17 @@
  * call functions (type getpid(), which just extracts a field from
  * current-task
  */
+#ifdef __x86_64__
+
+#include <linux/sched.h>
+
+struct task_struct init_task = INIT_TASK;
+
+struct task_struct *current;
+struct task_struct *task[NR_TASKS];
+
+#else
+
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/sys.h>
@@ -590,3 +601,5 @@ void sched_init(void)
 	outb(inb_p(0x21)&~0x01,0x21);
 	set_system_gate(0x80,&system_call);
 }
+
+#endif
