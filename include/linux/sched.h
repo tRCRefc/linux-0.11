@@ -1,6 +1,35 @@
 #ifndef _SCHED_H
 #define _SCHED_H
 
+#ifdef __x86_64__
+
+#define NR_TASKS 64
+
+#define TASK_RUNNING 0
+#define TASK_INTERRUPTIBLE 1
+#define TASK_UNINTERRUPTIBLE 2
+#define TASK_ZOMBIE 3
+#define TASK_STOPPED 4
+
+struct task_struct {
+    long state;
+    long counter;
+    long priority;
+    long pid;
+    long father;
+    unsigned long pg_dir;
+    unsigned long rsp0;
+};
+
+#define INIT_TASK { TASK_RUNNING, 15, 15, 0, -1, 0, 0 }
+
+extern struct task_struct *task[NR_TASKS];
+extern struct task_struct *current;
+
+extern void sched_init(void);
+
+#else
+
 #define NR_TASKS 64
 #define HZ 100
 
@@ -252,5 +281,7 @@ static inline unsigned long _get_base(char * addr)
 unsigned long __limit; \
 __asm__("lsll %1,%0\n\tincl %0":"=r" (__limit):"r" (segment)); \
 __limit;})
+
+#endif
 
 #endif
