@@ -29,6 +29,7 @@ x86_64_start:
 	call load_page_tables
 	call load_gdt
 	call load_idt
+	call sched_init
 	movq %r12, %rdi
 	call x86_64_kernel_main
 
@@ -227,6 +228,7 @@ early_idt:
 	.balign 4096
 boot_stack:
 	.skip 16384
+	.globl boot_stack_top
 boot_stack_top:
 
 	.balign PAGE_SIZE

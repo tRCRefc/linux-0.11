@@ -14,10 +14,23 @@
 
 #include <linux/sched.h>
 
-struct task_struct init_task = INIT_TASK;
+static struct task_struct init_task = INIT_TASK;
 
-struct task_struct *current;
-struct task_struct *task[NR_TASKS];
+struct task_struct *current __attribute__((visibility("hidden")));
+struct task_struct *task[NR_TASKS] __attribute__((visibility("hidden")));
+
+extern char boot_stack_top[] __attribute__((visibility("hidden")));
+
+void sched_init(void)
+{
+	unsigned long cr3;
+
+	current = &init_task;
+	task[0] = &init_task;
+	__asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+	current->pg_dir = cr3;
+	current->rsp0 = (unsigned long)boot_stack_top;
+}
 
 #else
 
