@@ -183,3 +183,49 @@ int split_large_page(unsigned long va)
 
     return 1;
 }
+
+unsigned long put_page(unsigned long page, unsigned long addr)
+{
+    unsigned long cr3;
+    unsigned long *pml4;
+    unsigned long *pdpt;
+    unsigned long *pd;
+    unsigned long *pt;
+
+    unsigned long pml4e;
+    unsigned long pdpte;
+    unsigned long pde;
+    unsigned long flush_addr;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+
+    pml4 = (unsigned long *)(cr3 & PAGE_TABLE_ADDR_MASK);
+    pml4e = pml4[(addr >> 39) & 0x1ffUL];
+    if (!(pml4e & PAGE_PRESENT)) return 0;
+
+    pdpt = (unsigned long *)(pml4e & PAGE_TABLE_ADDR_MASK);
+    pdpte = pdpt[(addr >> 30) & 0x1ffUL];
+    if (!(pdpte & PAGE_PRESENT)) return 0;
+    if (pdpte & PAGE_SIZE_FLAG) return 0;
+
+    pd = (unsigned long *)(pdpte & PAGE_TABLE_ADDR_MASK);
+    pde = pd[(addr >> 21) & 0x1ffUL];
+    if (!(pde & PAGE_PRESENT)) return 0;
+
+    if (pde & PAGE_SIZE_FLAG) {
+        if (!split_large_page(addr)) return 0;
+
+        pde = pd[(addr >> 21) & 0x1ffUL];
+        if (!(pde & PAGE_PRESENT)) return 0;
+        if (pde & PAGE_SIZE_FLAG) return 0;
+    }
+
+    pt = (unsigned long *)(pde & PAGE_TABLE_ADDR_MASK);
+    pt[(addr >> 12) & 0x1ffUL] =
+        (page & PAGE_TABLE_ADDR_MASK) | PAGE_PRESENT | PAGE_WRITE;
+
+    flush_addr = addr & ~(PAGE_SIZE - 1UL);
+    __asm__ volatile ("invlpg (%0)" :: "r" (flush_addr) : "memory");
+
+    return page;
+}
