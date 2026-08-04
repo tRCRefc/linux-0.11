@@ -19,7 +19,6 @@
 #define PAGE_WRITE 0x002UL
 #define PAGE_USER 0x004UL
 #define PAGE_TABLE_ENTRIES 512UL
-#define PAGE_FAULT_PRESENT 0x001UL
 
 static unsigned long low_mem;
 static unsigned long high_mem;
@@ -179,15 +178,22 @@ unsigned long switch_pg_dir(unsigned long page)
     return old;
 }
 
-void do_page_fault(unsigned long error, unsigned long addr)
+void do_wp_page(unsigned long error, unsigned long addr)
+{
+    (void)error;
+    (void)addr;
+    panic("unhandled page protection fault");
+}
+
+void do_no_page(unsigned long error, unsigned long addr)
 {
     unsigned long cr3;
     unsigned long page;
 
-    if (error & PAGE_FAULT_PRESENT)
-        panic("unhandled page protection fault");
+    (void)error;
     if (addr < USER_ADDRESS_START || addr >= USER_ADDRESS_LIMIT)
         panic("page fault outside user memory");
+    addr &= ~(PAGE_SIZE - 1UL);
 
     page = get_free_page();
     if (page == 0)

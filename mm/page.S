@@ -23,8 +23,12 @@ page_fault:
 	movq %cr2, %rsi
 	movq %rsp, %rbx
 	andq $-16, %rsp
-	call do_page_fault
-	movq %rbx, %rsp
+	testq $1, %rdi
+	jne 1f
+	call do_no_page
+	jmp 2f
+1:	call do_wp_page
+2:	movq %rbx, %rsp
 
 	popq %r15
 	popq %r14
