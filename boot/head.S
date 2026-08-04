@@ -1,5 +1,7 @@
 	.equ KERNEL_CS, 0x08
 	.equ KERNEL_DS, 0x10
+	.equ TSS_SELECTOR, 0x28
+	.equ TSS_SIZE, 104
 	.equ IDT_GATE_COUNT, 256
 	.equ IDT_GATE_SIZE, 16
 	.equ PAGE_SIZE, 4096
@@ -96,6 +98,23 @@ page_table_failure:
 
 	.type load_gdt, @function
 load_gdt:
+	leaq boot_stack_top(%rip), %rax
+	movq %rax, early_tss + 4(%rip)
+	movw $TSS_SIZE, early_tss + 102(%rip)
+
+	leaq early_tss(%rip), %rax
+	leaq gdt + TSS_SELECTOR(%rip), %rdi
+	movw $(TSS_SIZE - 1), 0(%rdi)
+	movw %ax, 2(%rdi)
+	shrq $16, %rax
+	movb %al, 4(%rdi)
+	movb $0x89, 5(%rdi)
+	movb $0, 6(%rdi)
+	movb %ah, 7(%rdi)
+	shrq $16, %rax
+	movl %eax, 8(%rdi)
+	movl $0, 12(%rdi)
+
 	subq $16, %rsp
 	movw $(gdt_end - gdt - 1), 0(%rsp)
 	leaq gdt(%rip), %rax
@@ -114,6 +133,8 @@ load_gdt:
 	movw %ax, %ss
 	movw %ax, %fs
 	movw %ax, %gs
+	movl $TSS_SELECTOR, %eax
+	ltr %ax
 	ret
 	.size load_gdt, .-load_gdt
 
@@ -164,15 +185,23 @@ early_exception:
 	jmp 1b
 	.size early_exception, .-early_exception
 
-	.section .rodata
+	.data
 	.balign 8
 gdt:
 	.quad 0x0000000000000000
 	.quad 0x00af9a000000ffff
 	.quad 0x00cf92000000ffff
+	.quad 0x00cff2000000ffff
+	.quad 0x00affa000000ffff
+	.quad 0x0000000000000000
+	.quad 0x0000000000000000
 gdt_end:
 
 	.bss
+	.balign 16
+early_tss:
+	.skip TSS_SIZE
+
 	.balign 16
 early_idt:
 	.skip IDT_GATE_COUNT * IDT_GATE_SIZE
