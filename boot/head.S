@@ -1,5 +1,7 @@
 	.equ KERNEL_CS, 0x08
 	.equ KERNEL_DS, 0x10
+	.equ USER_DS, 0x1b
+	.equ USER_CS, 0x23
 	.equ TSS_SELECTOR, 0x28
 	.equ TSS_SIZE, 104
 	.equ IDT_GATE_COUNT, 256
@@ -34,6 +36,22 @@ x86_64_start:
 	hlt
 	jmp 1b
 	.size x86_64_start, .-x86_64_start
+
+	.globl move_to_user_mode
+	.type move_to_user_mode, @function
+move_to_user_mode:
+	movl $USER_DS, %eax
+	movw %ax, %ds
+	movw %ax, %es
+	movw %ax, %fs
+	movw %ax, %gs
+	pushq $USER_DS
+	pushq %rsi
+	pushfq
+	pushq $USER_CS
+	pushq %rdi
+	iretq
+	.size move_to_user_mode, .-move_to_user_mode
 
 	.type load_page_tables, @function
 load_page_tables:
