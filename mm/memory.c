@@ -229,3 +229,18 @@ unsigned long put_page(unsigned long page, unsigned long addr)
 
     return page;
 }
+
+void get_empty_page(unsigned long addr)
+{
+    unsigned long page;
+    page = get_free_page();
+
+    if (page == 0) {
+        panic("out of memory");
+    }
+
+    if (put_page(page, addr) == 0) {
+        free_page(page);
+        panic("out of memory");
+    }
+}
