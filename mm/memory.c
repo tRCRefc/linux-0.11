@@ -17,6 +17,7 @@
 #define LARGE_PAGE_ADDR_MASK 0x000fffffffe00000UL
 #define LARGE_PAGE_OFFSET 0x001fffffUL
 #define PAGE_WRITE 0x002UL
+#define PAGE_USER 0x004UL
 #define PAGE_TABLE_ENTRIES 512UL
 
 static unsigned long low_mem;
@@ -113,6 +114,74 @@ unsigned long new_pg_dir(void)
     new_dir[256] = pg_dir[256];
 
     return page;
+}
+
+unsigned long put_user_page(unsigned long pg_dir, unsigned long page,
+                            unsigned long addr)
+{
+    unsigned long pdpt_page = 0;
+    unsigned long pd_page = 0;
+    unsigned long pt_page = 0;
+    unsigned long *pml4;
+    unsigned long *pdpt;
+    unsigned long *pd;
+    unsigned long *pt;
+    unsigned long entry;
+
+    pml4 = phys_to_virt(pg_dir);
+    entry = pml4[(addr >> 39) & 0x1ffUL];
+    if (entry & PAGE_PRESENT) {
+        pdpt = phys_to_virt(entry & PAGE_TABLE_ADDR_MASK);
+    } else {
+        pdpt_page = get_free_page();
+        if (pdpt_page == 0)
+            return 0;
+        pdpt = phys_to_virt(pdpt_page);
+    }
+
+    entry = pdpt[(addr >> 30) & 0x1ffUL];
+    if (entry & PAGE_PRESENT) {
+        pd = phys_to_virt(entry & PAGE_TABLE_ADDR_MASK);
+    } else {
+        pd_page = get_free_page();
+        if (pd_page == 0)
+            goto no_memory;
+        pd = phys_to_virt(pd_page);
+    }
+
+    entry = pd[(addr >> 21) & 0x1ffUL];
+    if (entry & PAGE_PRESENT) {
+        pt = phys_to_virt(entry & PAGE_TABLE_ADDR_MASK);
+    } else {
+        pt_page = get_free_page();
+        if (pt_page == 0)
+            goto no_memory;
+        pt = phys_to_virt(pt_page);
+    }
+
+    pt[(addr >> 12) & 0x1ffUL] =
+        (page & PAGE_TABLE_ADDR_MASK) |
+        PAGE_PRESENT | PAGE_WRITE | PAGE_USER;
+    if (pt_page != 0)
+        pd[(addr >> 21) & 0x1ffUL] =
+            pt_page | PAGE_PRESENT | PAGE_WRITE | PAGE_USER;
+    if (pd_page != 0)
+        pdpt[(addr >> 30) & 0x1ffUL] =
+            pd_page | PAGE_PRESENT | PAGE_WRITE | PAGE_USER;
+    if (pdpt_page != 0)
+        pml4[(addr >> 39) & 0x1ffUL] =
+            pdpt_page | PAGE_PRESENT | PAGE_WRITE | PAGE_USER;
+
+    return page;
+
+no_memory:
+    if (pt_page != 0)
+        free_page(pt_page);
+    if (pd_page != 0)
+        free_page(pd_page);
+    if (pdpt_page != 0)
+        free_page(pdpt_page);
+    return 0;
 }
 
 int resolve_addr(unsigned long va, unsigned long *pa)
