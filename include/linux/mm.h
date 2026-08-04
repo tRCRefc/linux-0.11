@@ -15,6 +15,8 @@
 #define PHYSICAL_MEMORY_WINDOW_START 0xffff800000000000UL
 #define PHYSICAL_MEMORY_WINDOW_END   0xffff800100000000UL
 
+#define phys_to_virt(phys) ((void *)(PHYSICAL_MEMORY_WINDOW_START + (phys)))
+
 extern void mem_init(unsigned long start_mem, unsigned long end_mem);
 extern unsigned long nr_free_pages(void);
 extern unsigned long get_free_page(void);

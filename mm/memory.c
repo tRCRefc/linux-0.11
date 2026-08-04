@@ -67,7 +67,7 @@ unsigned long get_free_page(void)
 
         mem_map[index] = 1;
         page = low_mem + index * PAGE_SIZE;
-        word = (unsigned long *)page;
+        word = phys_to_virt(page);
         words = PAGE_SIZE / sizeof(*word);
         while (words-- > 0)
             *word++ = 0;
@@ -109,23 +109,23 @@ int resolve_addr(unsigned long va, unsigned long *pa)
 
     __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
 
-    pml4 = (unsigned long *)(cr3 & PAGE_TABLE_ADDR_MASK);
+    pml4 = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
     pml4e = pml4[(va >> 39) & 0x1ffUL];
     if (!(pml4e & PAGE_PRESENT)) return 0;
 
-    pdpt = (unsigned long *)(pml4e & PAGE_TABLE_ADDR_MASK);
+    pdpt = phys_to_virt(pml4e & PAGE_TABLE_ADDR_MASK);
     pdpte = pdpt[(va >> 30) & 0x1ffUL];
     if (!(pdpte & PAGE_PRESENT)) return 0;
     if (pdpte & PAGE_SIZE_FLAG) return 0;
 
-    pd = (unsigned long *)(pdpte & PAGE_TABLE_ADDR_MASK);
+    pd = phys_to_virt(pdpte & PAGE_TABLE_ADDR_MASK);
     pde = pd[(va >> 21) & 0x1ffUL];
     if (!(pde & PAGE_PRESENT)) return 0;
     if (pde & PAGE_SIZE_FLAG) {
         *pa = ((pde & LARGE_PAGE_ADDR_MASK) | (va & LARGE_PAGE_OFFSET));
         return 1;
     } else {
-        pt = (unsigned long *)(pde & PAGE_TABLE_ADDR_MASK);
+        pt = phys_to_virt(pde & PAGE_TABLE_ADDR_MASK);
         pte = pt[(va >> 12) & 0x1ffUL];
         if (!(pte & PAGE_PRESENT)) return 0;
 
@@ -148,26 +148,28 @@ int split_large_page(unsigned long va)
 
     __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
 
-    pml4 = (unsigned long *)(cr3 & PAGE_TABLE_ADDR_MASK);
+    pml4 = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
     pml4e = pml4[(va >> 39) & 0x1ffUL];
     if (!(pml4e & PAGE_PRESENT)) return 0;
 
-    pdpt = (unsigned long *)(pml4e & PAGE_TABLE_ADDR_MASK);
+    pdpt = phys_to_virt(pml4e & PAGE_TABLE_ADDR_MASK);
     pdpte = pdpt[(va >> 30) & 0x1ffUL];
     if (!(pdpte & PAGE_PRESENT)) return 0;
     if (pdpte & PAGE_SIZE_FLAG) return 0;
 
-    pd = (unsigned long *)(pdpte & PAGE_TABLE_ADDR_MASK);
+    pd = phys_to_virt(pdpte & PAGE_TABLE_ADDR_MASK);
     pde = pd[(va >> 21) & 0x1ffUL];
     if (!(pde & PAGE_PRESENT)) return 0;
     if (!(pde & PAGE_SIZE_FLAG)) return 1;
 
     unsigned long base_addr;
+    unsigned long pt_page;
     unsigned long *pt;
 
     base_addr = pde & LARGE_PAGE_ADDR_MASK;
-    pt = (unsigned long *)get_free_page();
-    if (pt == 0) return 0;
+    pt_page = get_free_page();
+    if (pt_page == 0) return 0;
+    pt = phys_to_virt(pt_page);
 
     unsigned long i;
 
@@ -176,7 +178,7 @@ int split_large_page(unsigned long va)
     }
 
     pd[(va >> 21) & 0x1ffUL] =
-        ((unsigned long)pt & PAGE_TABLE_ADDR_MASK) | PAGE_PRESENT | PAGE_WRITE;
+        pt_page | PAGE_PRESENT | PAGE_WRITE;
 
     flush_addr = va & ~LARGE_PAGE_OFFSET;
     __asm__ volatile ("invlpg (%0)" :: "r" (flush_addr) : "memory");
@@ -199,16 +201,16 @@ unsigned long put_page(unsigned long page, unsigned long addr)
 
     __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
 
-    pml4 = (unsigned long *)(cr3 & PAGE_TABLE_ADDR_MASK);
+    pml4 = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
     pml4e = pml4[(addr >> 39) & 0x1ffUL];
     if (!(pml4e & PAGE_PRESENT)) return 0;
 
-    pdpt = (unsigned long *)(pml4e & PAGE_TABLE_ADDR_MASK);
+    pdpt = phys_to_virt(pml4e & PAGE_TABLE_ADDR_MASK);
     pdpte = pdpt[(addr >> 30) & 0x1ffUL];
     if (!(pdpte & PAGE_PRESENT)) return 0;
     if (pdpte & PAGE_SIZE_FLAG) return 0;
 
-    pd = (unsigned long *)(pdpte & PAGE_TABLE_ADDR_MASK);
+    pd = phys_to_virt(pdpte & PAGE_TABLE_ADDR_MASK);
     pde = pd[(addr >> 21) & 0x1ffUL];
     if (!(pde & PAGE_PRESENT)) return 0;
 
@@ -220,7 +222,7 @@ unsigned long put_page(unsigned long page, unsigned long addr)
         if (pde & PAGE_SIZE_FLAG) return 0;
     }
 
-    pt = (unsigned long *)(pde & PAGE_TABLE_ADDR_MASK);
+    pt = phys_to_virt(pde & PAGE_TABLE_ADDR_MASK);
     pt[(addr >> 12) & 0x1ffUL] =
         (page & PAGE_TABLE_ADDR_MASK) | PAGE_PRESENT | PAGE_WRITE;
 
