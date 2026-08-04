@@ -138,6 +138,15 @@ load_idt:
 	decl %ecx
 	jne 1b
 
+	leaq early_idt + 14 * IDT_GATE_SIZE(%rip), %rdi
+	leaq page_fault(%rip), %rax
+	movw %ax, 0(%rdi)
+	movq %rax, %rdx
+	shrq $16, %rdx
+	movw %dx, 6(%rdi)
+	shrq $16, %rdx
+	movl %edx, 8(%rdi)
+
 	subq $16, %rsp
 	movw $(IDT_GATE_COUNT * IDT_GATE_SIZE - 1), 0(%rsp)
 	leaq early_idt(%rip), %rax

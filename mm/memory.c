@@ -19,6 +19,7 @@
 #define PAGE_WRITE 0x002UL
 #define PAGE_USER 0x004UL
 #define PAGE_TABLE_ENTRIES 512UL
+#define PAGE_FAULT_PRESENT 0x001UL
 
 static unsigned long low_mem;
 static unsigned long high_mem;
@@ -176,6 +177,27 @@ unsigned long switch_pg_dir(unsigned long page)
     __asm__ volatile ("movq %%cr3, %0" : "=r" (old));
     __asm__ volatile ("movq %0, %%cr3" :: "r" (page) : "memory");
     return old;
+}
+
+void do_page_fault(unsigned long error, unsigned long addr)
+{
+    unsigned long cr3;
+    unsigned long page;
+
+    if (error & PAGE_FAULT_PRESENT)
+        panic("unhandled page protection fault");
+    if (addr < USER_ADDRESS_START || addr >= USER_ADDRESS_LIMIT)
+        panic("page fault outside user memory");
+
+    page = get_free_page();
+    if (page == 0)
+        panic("out of memory");
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+    if (put_user_page(cr3 & PAGE_TABLE_ADDR_MASK, page, addr) == 0) {
+        free_page(page);
+        panic("out of memory");
+    }
 }
 
 unsigned long put_user_page(unsigned long pg_dir, unsigned long page,

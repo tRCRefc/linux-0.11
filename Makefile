@@ -20,9 +20,10 @@ UEFI_OBJ := $(BUILD_DIR)/uefi/main.o
 HEAD_OBJ := $(BUILD_DIR)/boot/head.o
 KERNEL_OBJ := $(BUILD_DIR)/kernel/main.o
 MEMORY_OBJ := $(BUILD_DIR)/mm/memory.o
+PAGE_OBJ := $(BUILD_DIR)/mm/page.o
 PANIC_OBJ := $(BUILD_DIR)/kernel/panic.o
 SERIAL_OBJ := $(BUILD_DIR)/kernel/serial.o
-EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(KERNEL_OBJ) $(MEMORY_OBJ) \
+EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(KERNEL_OBJ) $(MEMORY_OBJ) $(PAGE_OBJ) \
 	$(PANIC_OBJ) $(SERIAL_OBJ)
 EFI_IMAGE := $(BUILD_DIR)/BOOTX64.EFI
 ESP_IMAGE := $(BUILD_DIR)/esp.img
@@ -88,6 +89,9 @@ $(KERNEL_OBJ): $(KERNEL_MAIN) $(INCLUDE_DIR)/asm/boot.h \
 
 $(MEMORY_OBJ): $(MEMORY_SOURCE) $(INCLUDE_DIR)/linux/mm.h | $(BUILD_DIR)/mm
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
+$(PAGE_OBJ): mm/page.S | $(BUILD_DIR)/mm
+	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
 
 $(PANIC_OBJ): $(PANIC_SOURCE) $(INCLUDE_DIR)/asm/serial.h \
 		$(INCLUDE_DIR)/linux/kernel.h | $(BUILD_DIR)/kernel
