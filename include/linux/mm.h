@@ -21,6 +21,7 @@ extern void mem_init(unsigned long start_mem, unsigned long end_mem);
 extern unsigned long nr_free_pages(void);
 extern unsigned long get_free_page(void);
 extern unsigned long new_pg_dir(void);
+extern unsigned long copy_pg_dir(unsigned long pg_dir);
 extern void free_pg_dir(unsigned long pg_dir);
 extern unsigned long switch_pg_dir(unsigned long pg_dir);
 extern unsigned long put_user_page(unsigned long pg_dir, unsigned long page,

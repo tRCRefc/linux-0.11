@@ -169,6 +169,139 @@ void free_pg_dir(unsigned long page)
     free_page(page);
 }
 
+static void invalidate(void)
+{
+    unsigned long cr3;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+    __asm__ volatile ("movq %0, %%cr3" :: "r" (cr3) : "memory");
+}
+
+static unsigned long copy_pt(unsigned long from)
+{
+    unsigned long *from_pt;
+    unsigned long *to_pt;
+    unsigned long to;
+    unsigned long i;
+
+    to = get_free_page();
+    if (to == 0)
+        return 0;
+
+    from_pt = phys_to_virt(from);
+    to_pt = phys_to_virt(to);
+    for (i = 0; i < PAGE_TABLE_ENTRIES; ++i) {
+        unsigned long entry;
+        unsigned long page;
+
+        entry = from_pt[i];
+        if (!(entry & PAGE_PRESENT))
+            continue;
+        entry &= ~PAGE_WRITE;
+        from_pt[i] = entry;
+        to_pt[i] = entry;
+        page = entry & PAGE_TABLE_ADDR_MASK;
+        if (page >= low_mem)
+            ++mem_map[(page - low_mem) / PAGE_SIZE];
+    }
+    return to;
+}
+
+static unsigned long copy_pd(unsigned long from)
+{
+    unsigned long *from_pd;
+    unsigned long *to_pd;
+    unsigned long to;
+    unsigned long i;
+
+    to = get_free_page();
+    if (to == 0)
+        return 0;
+
+    from_pd = phys_to_virt(from);
+    to_pd = phys_to_virt(to);
+    for (i = 0; i < PAGE_TABLE_ENTRIES; ++i) {
+        unsigned long entry;
+        unsigned long pt;
+
+        entry = from_pd[i];
+        if (!(entry & PAGE_PRESENT))
+            continue;
+        pt = copy_pt(entry & PAGE_TABLE_ADDR_MASK);
+        if (pt == 0) {
+            free_pd(to);
+            return 0;
+        }
+        to_pd[i] = pt | (entry & ~PAGE_TABLE_ADDR_MASK);
+    }
+    return to;
+}
+
+static unsigned long copy_pdpt(unsigned long from)
+{
+    unsigned long *from_pdpt;
+    unsigned long *to_pdpt;
+    unsigned long to;
+    unsigned long i;
+
+    to = get_free_page();
+    if (to == 0)
+        return 0;
+
+    from_pdpt = phys_to_virt(from);
+    to_pdpt = phys_to_virt(to);
+    for (i = 0; i < PAGE_TABLE_ENTRIES; ++i) {
+        unsigned long entry;
+        unsigned long pd;
+
+        entry = from_pdpt[i];
+        if (!(entry & PAGE_PRESENT))
+            continue;
+        pd = copy_pd(entry & PAGE_TABLE_ADDR_MASK);
+        if (pd == 0) {
+            free_pdpt(to);
+            return 0;
+        }
+        to_pdpt[i] = pd | (entry & ~PAGE_TABLE_ADDR_MASK);
+    }
+    return to;
+}
+
+unsigned long copy_pg_dir(unsigned long from)
+{
+    unsigned long *from_dir;
+    unsigned long *to_dir;
+    unsigned long to;
+    unsigned long i;
+
+    to = get_free_page();
+    if (to == 0)
+        return 0;
+
+    from_dir = phys_to_virt(from);
+    to_dir = phys_to_virt(to);
+    to_dir[0] = from_dir[0];
+    to_dir[256] = from_dir[256];
+    for (i = USER_ADDRESS_START >> 39;
+         i < USER_ADDRESS_LIMIT >> 39; ++i) {
+        unsigned long entry;
+        unsigned long pdpt;
+
+        entry = from_dir[i];
+        if (!(entry & PAGE_PRESENT))
+            continue;
+        pdpt = copy_pdpt(entry & PAGE_TABLE_ADDR_MASK);
+        if (pdpt == 0) {
+            free_pg_dir(to);
+            invalidate();
+            return 0;
+        }
+        to_dir[i] = pdpt | (entry & ~PAGE_TABLE_ADDR_MASK);
+    }
+    invalidate();
+    return to;
+}
+
 unsigned long switch_pg_dir(unsigned long page)
 {
     unsigned long old;
