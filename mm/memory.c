@@ -116,6 +116,59 @@ unsigned long new_pg_dir(void)
     return page;
 }
 
+static void free_pt(unsigned long page)
+{
+    unsigned long *pt;
+    unsigned long i;
+
+    pt = phys_to_virt(page);
+    for (i = 0; i < PAGE_TABLE_ENTRIES; ++i) {
+        if (pt[i] & PAGE_PRESENT)
+            free_page(pt[i] & PAGE_TABLE_ADDR_MASK);
+    }
+    free_page(page);
+}
+
+static void free_pd(unsigned long page)
+{
+    unsigned long *pd;
+    unsigned long i;
+
+    pd = phys_to_virt(page);
+    for (i = 0; i < PAGE_TABLE_ENTRIES; ++i) {
+        if (pd[i] & PAGE_PRESENT)
+            free_pt(pd[i] & PAGE_TABLE_ADDR_MASK);
+    }
+    free_page(page);
+}
+
+static void free_pdpt(unsigned long page)
+{
+    unsigned long *pdpt;
+    unsigned long i;
+
+    pdpt = phys_to_virt(page);
+    for (i = 0; i < PAGE_TABLE_ENTRIES; ++i) {
+        if (pdpt[i] & PAGE_PRESENT)
+            free_pd(pdpt[i] & PAGE_TABLE_ADDR_MASK);
+    }
+    free_page(page);
+}
+
+void free_pg_dir(unsigned long page)
+{
+    unsigned long *pg_dir;
+    unsigned long i;
+
+    pg_dir = phys_to_virt(page);
+    for (i = USER_ADDRESS_START >> 39;
+         i < USER_ADDRESS_LIMIT >> 39; ++i) {
+        if (pg_dir[i] & PAGE_PRESENT)
+            free_pdpt(pg_dir[i] & PAGE_TABLE_ADDR_MASK);
+    }
+    free_page(page);
+}
+
 unsigned long put_user_page(unsigned long pg_dir, unsigned long page,
                             unsigned long addr)
 {
