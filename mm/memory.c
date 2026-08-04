@@ -16,6 +16,8 @@
 #define PAGE_TABLE_ADDR_MASK 0x000ffffffffff000UL
 #define LARGE_PAGE_ADDR_MASK 0x000fffffffe00000UL
 #define LARGE_PAGE_OFFSET 0x001fffffUL
+#define PAGE_WRITE 0x002UL
+#define PAGE_TABLE_ENTRIES 512UL
 
 static unsigned long low_mem;
 static unsigned long high_mem;
@@ -130,4 +132,54 @@ int resolve_addr(unsigned long va, unsigned long *pa)
         *pa = ((pte & PAGE_TABLE_ADDR_MASK) | (va & (PAGE_SIZE - 1UL)));
         return 1;
     }
+}
+
+int split_large_page(unsigned long va)
+{
+    unsigned long cr3;
+    unsigned long *pml4;
+    unsigned long *pdpt;
+    unsigned long *pd;
+
+    unsigned long pml4e;
+    unsigned long pdpte;
+    unsigned long pde;
+    unsigned long flush_addr;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+
+    pml4 = (unsigned long *)(cr3 & PAGE_TABLE_ADDR_MASK);
+    pml4e = pml4[(va >> 39) & 0x1ffUL];
+    if (!(pml4e & PAGE_PRESENT)) return 0;
+
+    pdpt = (unsigned long *)(pml4e & PAGE_TABLE_ADDR_MASK);
+    pdpte = pdpt[(va >> 30) & 0x1ffUL];
+    if (!(pdpte & PAGE_PRESENT)) return 0;
+    if (pdpte & PAGE_SIZE_FLAG) return 0;
+
+    pd = (unsigned long *)(pdpte & PAGE_TABLE_ADDR_MASK);
+    pde = pd[(va >> 21) & 0x1ffUL];
+    if (!(pde & PAGE_PRESENT)) return 0;
+    if (!(pde & PAGE_SIZE_FLAG)) return 1;
+
+    unsigned long base_addr;
+    unsigned long *pt;
+
+    base_addr = pde & LARGE_PAGE_ADDR_MASK;
+    pt = (unsigned long *)get_free_page();
+    if (pt == 0) return 0;
+
+    unsigned long i;
+
+    for (i = 0; i < PAGE_TABLE_ENTRIES; ++i){
+        pt[i] = (base_addr + i * PAGE_SIZE) | PAGE_PRESENT | PAGE_WRITE;
+    }
+
+    pd[(va >> 21) & 0x1ffUL] =
+        ((unsigned long)pt & PAGE_TABLE_ADDR_MASK) | PAGE_PRESENT | PAGE_WRITE;
+
+    flush_addr = va & ~LARGE_PAGE_OFFSET;
+    __asm__ volatile ("invlpg (%0)" :: "r" (flush_addr) : "memory");
+
+    return 1;
 }
