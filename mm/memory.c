@@ -313,9 +313,49 @@ unsigned long switch_pg_dir(unsigned long page)
 
 void do_wp_page(unsigned long error, unsigned long addr)
 {
+    unsigned long cr3;
+    unsigned long *pml4;
+    unsigned long *pdpt;
+    unsigned long *pd;
+    unsigned long *pt;
+    unsigned long old_page;
+    unsigned long new_page;
+    unsigned long *from;
+    unsigned long *to;
+    unsigned long words;
+
     (void)error;
-    (void)addr;
-    panic("unhandled page protection fault");
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+    pml4 = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
+    pdpt = phys_to_virt(pml4[(addr >> 39) & 0x1ffUL] &
+                        PAGE_TABLE_ADDR_MASK);
+    pd = phys_to_virt(pdpt[(addr >> 30) & 0x1ffUL] &
+                      PAGE_TABLE_ADDR_MASK);
+    pt = phys_to_virt(pd[(addr >> 21) & 0x1ffUL] &
+                      PAGE_TABLE_ADDR_MASK);
+    pt += (addr >> 12) & 0x1ffUL;
+    old_page = *pt & PAGE_TABLE_ADDR_MASK;
+
+    if (old_page >= low_mem &&
+        mem_map[(old_page - low_mem) / PAGE_SIZE] == 1) {
+        *pt |= PAGE_WRITE;
+        invalidate();
+        return;
+    }
+
+    new_page = get_free_page();
+    if (new_page == 0)
+        panic("out of memory");
+    from = phys_to_virt(old_page);
+    to = phys_to_virt(new_page);
+    words = PAGE_SIZE / sizeof(*from);
+    while (words-- > 0)
+        *to++ = *from++;
+
+    if (old_page >= low_mem)
+        --mem_map[(old_page - low_mem) / PAGE_SIZE];
+    *pt = new_page | ((*pt & ~PAGE_TABLE_ADDR_MASK) | PAGE_WRITE);
+    invalidate();
 }
 
 void do_no_page(unsigned long error, unsigned long addr)
