@@ -169,6 +169,15 @@ void free_pg_dir(unsigned long page)
     free_page(page);
 }
 
+unsigned long switch_pg_dir(unsigned long page)
+{
+    unsigned long old;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (old));
+    __asm__ volatile ("movq %0, %%cr3" :: "r" (page) : "memory");
+    return old;
+}
+
 unsigned long put_user_page(unsigned long pg_dir, unsigned long page,
                             unsigned long addr)
 {
