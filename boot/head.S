@@ -6,6 +6,7 @@
 	.equ PAGE_TABLE_PAGES, 6
 	.equ PAGE_DIRECTORY_COUNT, 4
 	.equ LARGE_PAGE_COUNT, 2048
+	.equ PHYS_MAP_SLOT, 256
 	.equ PAGE_PRESENT_WRITE, 0x003
 	.equ LARGE_PAGE_FLAGS, 0x083
 	.equ CR0_WRITE_PROTECT, 0x00010000
@@ -74,6 +75,7 @@ load_page_tables:
 	leaq early_pdpt(%rip), %rax
 	orq $PAGE_PRESENT_WRITE, %rax
 	movq %rax, early_pml4(%rip)
+	movq %rax, early_pml4 + PHYS_MAP_SLOT * 8(%rip)
 
 	leaq early_pml4(%rip), %rax
 	movq %rax, %cr3
