@@ -95,6 +95,26 @@ void free_page(unsigned long address)
     --mem_map[index];
 }
 
+unsigned long new_pg_dir(void)
+{
+    unsigned long cr3;
+    unsigned long page;
+    unsigned long *pg_dir;
+    unsigned long *new_dir;
+
+    page = get_free_page();
+    if (page == 0)
+        return 0;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+    pg_dir = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
+    new_dir = phys_to_virt(page);
+    new_dir[0] = pg_dir[0];
+    new_dir[256] = pg_dir[256];
+
+    return page;
+}
+
 int resolve_addr(unsigned long va, unsigned long *pa)
 {
     unsigned long cr3;

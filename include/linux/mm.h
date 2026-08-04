@@ -20,6 +20,7 @@
 extern void mem_init(unsigned long start_mem, unsigned long end_mem);
 extern unsigned long nr_free_pages(void);
 extern unsigned long get_free_page(void);
+extern unsigned long new_pg_dir(void);
 extern unsigned long put_page(unsigned long page,unsigned long address);
 extern void free_page(unsigned long addr);
 extern void get_empty_page(unsigned long addr);
