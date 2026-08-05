@@ -325,6 +325,8 @@ void do_wp_page(unsigned long error, unsigned long addr)
     unsigned long words;
 
     (void)error;
+    if (addr < USER_ADDRESS_START || addr >= USER_ADDRESS_LIMIT)
+        panic("page fault outside user memory");
     __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
     pml4 = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
     pdpt = phys_to_virt(pml4[(addr >> 39) & 0x1ffUL] &
