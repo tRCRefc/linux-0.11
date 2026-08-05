@@ -38,6 +38,34 @@ void sched_init(void)
 	set_system_gate(0x80, system_call);
 }
 
+void schedule(void)
+{
+	struct task_struct *p;
+	int i;
+	int next;
+	long c;
+
+	for (;;) {
+		c = -1;
+		next = 0;
+		for (i = NR_TASKS - 1; i > 0; --i) {
+			p = task[i];
+			if (p && p->state == TASK_RUNNING && p->counter > c) {
+				c = p->counter;
+				next = i;
+			}
+		}
+		if (c)
+			break;
+		for (i = NR_TASKS - 1; i > 0; --i) {
+			p = task[i];
+			if (p)
+				p->counter = (p->counter >> 1) + p->priority;
+		}
+	}
+	switch_to(task[next]);
+}
+
 long sys_getpid(void)
 {
 	return current->pid;

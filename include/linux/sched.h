@@ -30,6 +30,7 @@ extern struct task_struct *current
 	__attribute__((visibility("hidden")));
 
 extern void sched_init(void);
+extern void schedule(void);
 extern void switch_to(struct task_struct *next);
 
 #else
