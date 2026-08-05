@@ -12,6 +12,7 @@
  */
 #ifdef __x86_64__
 
+#include <linux/mm.h>
 #include <linux/sched.h>
 
 static struct task_struct init_task = INIT_TASK;
@@ -20,6 +21,8 @@ struct task_struct *current __attribute__((visibility("hidden")));
 struct task_struct *task[NR_TASKS] __attribute__((visibility("hidden")));
 
 extern char boot_stack_top[] __attribute__((visibility("hidden")));
+extern void set_tss_rsp0(unsigned long rsp0);
+extern void switch_context(unsigned long *prev_rsp, unsigned long next_rsp);
 
 void sched_init(void)
 {
@@ -30,6 +33,19 @@ void sched_init(void)
 	__asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
 	current->pg_dir = cr3;
 	current->rsp0 = (unsigned long)boot_stack_top;
+}
+
+void switch_to(struct task_struct *next)
+{
+	struct task_struct *prev;
+
+	prev = current;
+	if (prev == next)
+		return;
+	current = next;
+	switch_pg_dir(next->pg_dir);
+	set_tss_rsp0(next->rsp0);
+	switch_context(&prev->rsp, next->rsp);
 }
 
 #else

@@ -54,6 +54,13 @@ move_to_user_mode:
 	iretq
 	.size move_to_user_mode, .-move_to_user_mode
 
+	.globl set_tss_rsp0
+	.type set_tss_rsp0, @function
+set_tss_rsp0:
+	movq %rdi, early_tss + 4(%rip)
+	ret
+	.size set_tss_rsp0, .-set_tss_rsp0
+
 	.type load_page_tables, @function
 load_page_tables:
 	leaq x86_64_start(%rip), %rax

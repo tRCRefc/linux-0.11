@@ -19,14 +19,16 @@ struct task_struct {
     long father;
     unsigned long pg_dir;
     unsigned long rsp0;
+    unsigned long rsp;
 };
 
-#define INIT_TASK { TASK_RUNNING, 15, 15, 0, -1, 0, 0 }
+#define INIT_TASK { TASK_RUNNING, 15, 15, 0, -1, 0, 0, 0 }
 
 extern struct task_struct *task[NR_TASKS];
 extern struct task_struct *current;
 
 extern void sched_init(void);
+extern void switch_to(struct task_struct *next);
 
 #else
 

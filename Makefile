@@ -6,6 +6,7 @@ UEFI_DIR := boot/uefi
 KERNEL_MAIN := init/main.c
 MEMORY_SOURCE := mm/memory.c
 SCHED_SOURCE := kernel/sched.c
+SWITCH_SOURCE := kernel/switch.S
 PANIC_SOURCE := kernel/panic.c
 SERIAL_SOURCE := kernel/chr_drv/serial.c
 INCLUDE_DIR := include
@@ -23,10 +24,11 @@ KERNEL_OBJ := $(BUILD_DIR)/kernel/main.o
 MEMORY_OBJ := $(BUILD_DIR)/mm/memory.o
 PAGE_OBJ := $(BUILD_DIR)/mm/page.o
 SCHED_OBJ := $(BUILD_DIR)/kernel/sched.o
+SWITCH_OBJ := $(BUILD_DIR)/kernel/switch.o
 PANIC_OBJ := $(BUILD_DIR)/kernel/panic.o
 SERIAL_OBJ := $(BUILD_DIR)/kernel/serial.o
 EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(KERNEL_OBJ) $(MEMORY_OBJ) $(PAGE_OBJ) \
-	$(SCHED_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ)
+	$(SCHED_OBJ) $(SWITCH_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ)
 EFI_IMAGE := $(BUILD_DIR)/BOOTX64.EFI
 ESP_IMAGE := $(BUILD_DIR)/esp.img
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -97,6 +99,9 @@ $(PAGE_OBJ): mm/page.S | $(BUILD_DIR)/mm
 
 $(SCHED_OBJ): $(SCHED_SOURCE) $(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
+$(SWITCH_OBJ): $(SWITCH_SOURCE) | $(BUILD_DIR)/kernel
+	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
 
 $(PANIC_OBJ): $(PANIC_SOURCE) $(INCLUDE_DIR)/asm/serial.h \
 		$(INCLUDE_DIR)/linux/kernel.h | $(BUILD_DIR)/kernel
