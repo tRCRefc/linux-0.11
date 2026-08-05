@@ -13,10 +13,23 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 
+static void tell_father(long pid)
+{
+	int i;
+
+	for (i = 0; i < NR_TASKS; ++i) {
+		if (task[i] && task[i]->pid == pid) {
+			task[i]->signal |= 1L << (SIGCHLD - 1);
+			return;
+		}
+	}
+}
+
 static long do_exit(long code)
 {
 	current->state = TASK_ZOMBIE;
 	current->exit_code = code;
+	tell_father(current->father);
 	schedule();
 	return -1;
 }
@@ -59,6 +72,7 @@ repeat:
 			continue;
 		child_pid = p->pid;
 		code = p->exit_code;
+		current->signal &= ~(1L << (SIGCHLD - 1));
 		task[i] = 0;
 		free_pg_dir(p->pg_dir);
 		free_page((unsigned long)p - PHYSICAL_MEMORY_WINDOW_START);
@@ -73,6 +87,7 @@ repeat:
 	current->state = TASK_INTERRUPTIBLE;
 	schedule();
 	current->state = TASK_RUNNING;
+	current->signal &= ~(1L << (SIGCHLD - 1));
 	goto repeat;
 }
 

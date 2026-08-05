@@ -3,6 +3,8 @@
 
 #ifdef __x86_64__
 
+#include <signal.h>
+
 #define NR_TASKS 64
 
 #define TASK_RUNNING 0
@@ -15,6 +17,7 @@ struct task_struct {
     long state;
     long counter;
     long priority;
+    long signal;
     long pid;
     long father;
     long exit_code;
@@ -23,7 +26,7 @@ struct task_struct {
     unsigned long rsp;
 };
 
-#define INIT_TASK { TASK_RUNNING, 15, 15, 0, -1, 0, 0, 0, 0 }
+#define INIT_TASK { TASK_RUNNING, 15, 15, 0, 0, -1, 0, 0, 0, 0 }
 
 extern struct task_struct *task[NR_TASKS]
 	__attribute__((visibility("hidden")));

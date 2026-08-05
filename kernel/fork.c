@@ -51,6 +51,7 @@ static long copy_process(int nr, const struct pt_regs *regs)
 		return -EAGAIN;
 	p = phys_to_virt(page);
 	*p = *current;
+	p->signal = 0;
 	p->state = TASK_UNINTERRUPTIBLE;
 	p->pid = last_pid;
 	p->father = current->pid;

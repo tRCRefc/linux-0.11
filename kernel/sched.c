@@ -50,6 +50,9 @@ void schedule(void)
 		next = 0;
 		for (i = NR_TASKS - 1; i > 0; --i) {
 			p = task[i];
+			if (p && p->state == TASK_INTERRUPTIBLE &&
+			    (p->signal & (1L << (SIGCHLD - 1))))
+				p->state = TASK_RUNNING;
 			if (p && p->state == TASK_RUNNING && p->counter > c) {
 				c = p->counter;
 				next = i;
