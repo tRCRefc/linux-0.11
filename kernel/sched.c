@@ -12,6 +12,7 @@
  */
 #ifdef __x86_64__
 
+#include <asm/system.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 
@@ -21,6 +22,7 @@ struct task_struct *current __attribute__((visibility("hidden")));
 struct task_struct *task[NR_TASKS] __attribute__((visibility("hidden")));
 
 extern char boot_stack_top[] __attribute__((visibility("hidden")));
+extern void system_call(void) __attribute__((visibility("hidden")));
 extern void set_tss_rsp0(unsigned long rsp0);
 extern void switch_context(unsigned long *prev_rsp, unsigned long next_rsp);
 
@@ -33,6 +35,12 @@ void sched_init(void)
 	__asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
 	current->pg_dir = cr3;
 	current->rsp0 = (unsigned long)boot_stack_top;
+	set_system_gate(0x80, system_call);
+}
+
+long sys_getpid(void)
+{
+	return current->pid;
 }
 
 void switch_to(struct task_struct *next)

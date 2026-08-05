@@ -5,6 +5,7 @@
 
 extern void move_to_user_mode(unsigned long rip, unsigned long rsp)
     __attribute__((noreturn));
+extern void set_system_gate(unsigned long nr, void (*handler)(void));
 
 #else
 

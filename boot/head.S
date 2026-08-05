@@ -61,6 +61,25 @@ set_tss_rsp0:
 	ret
 	.size set_tss_rsp0, .-set_tss_rsp0
 
+	.globl set_system_gate
+	.type set_system_gate, @function
+set_system_gate:
+	leaq early_idt(%rip), %rax
+	shlq $4, %rdi
+	addq %rdi, %rax
+	movw %si, 0(%rax)
+	movw $KERNEL_CS, 2(%rax)
+	movb $0, 4(%rax)
+	movb $0xef, 5(%rax)
+	movq %rsi, %rdx
+	shrq $16, %rdx
+	movw %dx, 6(%rax)
+	shrq $16, %rdx
+	movl %edx, 8(%rax)
+	movl $0, 12(%rax)
+	ret
+	.size set_system_gate, .-set_system_gate
+
 	.type load_page_tables, @function
 load_page_tables:
 	leaq x86_64_start(%rip), %rax
