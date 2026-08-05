@@ -67,7 +67,11 @@ sys_call_table:
 	.long 0
 	.long sys_exit - .
 	.long sys_fork - .
-	.rept NR_SYSTEM_CALLS - 4
+	.rept 4
+	.long 0
+	.endr
+	.long sys_waitpid - .
+	.rept NR_SYSTEM_CALLS - 9
 	.long 0
 	.endr
 	.long sys_getpid - .

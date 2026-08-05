@@ -119,7 +119,7 @@ $(FORK_OBJ): $(FORK_SOURCE) $(INCLUDE_DIR)/asm/ptrace.h \
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
 $(EXIT_OBJ): $(EXIT_SOURCE) $(INCLUDE_DIR)/asm/ptrace.h \
-		$(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
+		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
 $(PANIC_OBJ): $(PANIC_SOURCE) $(INCLUDE_DIR)/asm/serial.h \

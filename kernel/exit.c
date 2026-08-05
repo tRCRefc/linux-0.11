@@ -6,7 +6,11 @@
 
 #ifdef __x86_64__
 
+#include <errno.h>
+#include <sys/wait.h>
+
 #include <asm/ptrace.h>
+#include <linux/mm.h>
 #include <linux/sched.h>
 
 static long do_exit(long code)
@@ -20,6 +24,56 @@ static long do_exit(long code)
 long sys_exit(const struct pt_regs *regs)
 {
 	return do_exit((regs->rbx & 0xff) << 8);
+}
+
+long sys_waitpid(const struct pt_regs *regs)
+{
+	struct task_struct *p;
+	unsigned long status;
+	long options;
+	long pid;
+	long child_pid;
+	long code;
+	int found;
+	int i;
+
+	pid = (long)regs->rbx;
+	status = regs->rcx;
+	options = (long)regs->rdx;
+	if (status && (status < USER_ADDRESS_START ||
+	               status > USER_ADDRESS_LIMIT - sizeof(unsigned int)))
+		return -EFAULT;
+
+repeat:
+	found = 0;
+	for (i = NR_TASKS - 1; i > 0; --i) {
+		p = task[i];
+		if (!p || p->father != current->pid)
+			continue;
+		if (pid > 0 && p->pid != pid)
+			continue;
+		if (pid != -1 && pid <= 0)
+			continue;
+		found = 1;
+		if (p->state != TASK_ZOMBIE)
+			continue;
+		child_pid = p->pid;
+		code = p->exit_code;
+		task[i] = 0;
+		free_pg_dir(p->pg_dir);
+		free_page((unsigned long)p - PHYSICAL_MEMORY_WINDOW_START);
+		if (status)
+			*(unsigned int *)status = (unsigned int)code;
+		return child_pid;
+	}
+	if (!found)
+		return -ECHILD;
+	if (options & WNOHANG)
+		return 0;
+	current->state = TASK_INTERRUPTIBLE;
+	schedule();
+	current->state = TASK_RUNNING;
+	goto repeat;
 }
 
 #else
