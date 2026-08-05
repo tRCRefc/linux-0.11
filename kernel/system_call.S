@@ -32,11 +32,16 @@ system_call:
 	testq %rax, %rax
 	je 1f
 	addq %rdx, %rax
+	movq %rsp, %rdi
 	call *%rax
 	jmp 2f
 1:	movq $-1, %rax
 2:	movq %rax, RAX(%rsp)
 
+	.globl ret_from_system_call
+	.hidden ret_from_system_call
+	.type ret_from_system_call, @function
+ret_from_system_call:
 	popq %r15
 	popq %r14
 	popq %r13
@@ -54,11 +59,15 @@ system_call:
 	popq %rax
 	iretq
 	.size system_call, .-system_call
+	.size ret_from_system_call, .-ret_from_system_call
 
 	.section .rodata
 	.balign 4
 sys_call_table:
-	.rept NR_SYSTEM_CALLS - 1
+	.long 0
+	.long 0
+	.long sys_fork - .
+	.rept NR_SYSTEM_CALLS - 4
 	.long 0
 	.endr
 	.long sys_getpid - .

@@ -12,6 +12,88 @@
  */
 #include <errno.h>
 
+#ifdef __x86_64__
+
+#include <asm/ptrace.h>
+#include <linux/mm.h>
+#include <linux/sched.h>
+
+extern void ret_from_system_call(void) __attribute__((visibility("hidden")));
+
+long last_pid __attribute__((visibility("hidden")));
+
+int find_empty_process(void)
+{
+	int i;
+
+repeat:
+	if (++last_pid < 0)
+		last_pid = 1;
+	for (i = 0; i < NR_TASKS; ++i)
+		if (task[i] && task[i]->pid == last_pid)
+			goto repeat;
+	for (i = 1; i < NR_TASKS; ++i)
+		if (!task[i])
+			return i;
+	return -EAGAIN;
+}
+
+static long copy_process(int nr, const struct pt_regs *regs)
+{
+	struct task_struct *p;
+	struct pt_regs *child_regs;
+	unsigned long *stack;
+	unsigned long page;
+	unsigned long pg_dir;
+
+	page = get_free_page();
+	if (!page)
+		return -EAGAIN;
+	p = phys_to_virt(page);
+	*p = *current;
+	p->state = TASK_UNINTERRUPTIBLE;
+	p->pid = last_pid;
+	p->father = current->pid;
+	p->counter = p->priority;
+
+	pg_dir = copy_pg_dir(current->pg_dir);
+	if (!pg_dir) {
+		free_page(page);
+		return -EAGAIN;
+	}
+	p->pg_dir = pg_dir;
+	p->rsp0 = (unsigned long)p + PAGE_SIZE;
+
+	child_regs = (struct pt_regs *)(p->rsp0 - sizeof(*child_regs));
+	*child_regs = *regs;
+	child_regs->rax = 0;
+	stack = (unsigned long *)child_regs - 7;
+	stack[0] = regs->r15;
+	stack[1] = regs->r14;
+	stack[2] = regs->r13;
+	stack[3] = regs->r12;
+	stack[4] = regs->rbp;
+	stack[5] = regs->rbx;
+	stack[6] = (unsigned long)ret_from_system_call;
+	p->rsp = (unsigned long)stack;
+
+	task[nr] = p;
+	p->state = TASK_RUNNING;
+	return last_pid;
+}
+
+long sys_fork(const struct pt_regs *regs)
+{
+	int nr;
+
+	nr = find_empty_process();
+	if (nr < 0)
+		return nr;
+	return copy_process(nr, regs);
+}
+
+#else
+
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <asm/segment.h>
@@ -228,3 +310,5 @@ int find_empty_process(void)
 			return i;
 	return -EAGAIN;
 }
+
+#endif

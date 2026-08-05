@@ -24,8 +24,10 @@ struct task_struct {
 
 #define INIT_TASK { TASK_RUNNING, 15, 15, 0, -1, 0, 0, 0 }
 
-extern struct task_struct *task[NR_TASKS];
-extern struct task_struct *current;
+extern struct task_struct *task[NR_TASKS]
+	__attribute__((visibility("hidden")));
+extern struct task_struct *current
+	__attribute__((visibility("hidden")));
 
 extern void sched_init(void);
 extern void switch_to(struct task_struct *next);
