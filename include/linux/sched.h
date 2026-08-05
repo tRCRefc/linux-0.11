@@ -17,12 +17,13 @@ struct task_struct {
     long priority;
     long pid;
     long father;
+    long exit_code;
     unsigned long pg_dir;
     unsigned long rsp0;
     unsigned long rsp;
 };
 
-#define INIT_TASK { TASK_RUNNING, 15, 15, 0, -1, 0, 0, 0 }
+#define INIT_TASK { TASK_RUNNING, 15, 15, 0, -1, 0, 0, 0, 0 }
 
 extern struct task_struct *task[NR_TASKS]
 	__attribute__((visibility("hidden")));

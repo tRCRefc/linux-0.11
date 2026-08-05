@@ -65,7 +65,7 @@ ret_from_system_call:
 	.balign 4
 sys_call_table:
 	.long 0
-	.long 0
+	.long sys_exit - .
 	.long sys_fork - .
 	.rept NR_SYSTEM_CALLS - 4
 	.long 0

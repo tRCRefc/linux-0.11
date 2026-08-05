@@ -4,6 +4,26 @@
  *  (C) 1991  Linus Torvalds
  */
 
+#ifdef __x86_64__
+
+#include <asm/ptrace.h>
+#include <linux/sched.h>
+
+static long do_exit(long code)
+{
+	current->state = TASK_ZOMBIE;
+	current->exit_code = code;
+	schedule();
+	return -1;
+}
+
+long sys_exit(const struct pt_regs *regs)
+{
+	return do_exit((regs->rbx & 0xff) << 8);
+}
+
+#else
+
 #include <errno.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -287,4 +307,4 @@ repeat:
 	return -ECHILD;
 }
 
-
+#endif

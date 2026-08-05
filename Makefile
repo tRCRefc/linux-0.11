@@ -9,6 +9,7 @@ SCHED_SOURCE := kernel/sched.c
 SWITCH_SOURCE := kernel/switch.S
 SYSTEM_CALL_SOURCE := kernel/system_call.S
 FORK_SOURCE := kernel/fork.c
+EXIT_SOURCE := kernel/exit.c
 PANIC_SOURCE := kernel/panic.c
 SERIAL_SOURCE := kernel/chr_drv/serial.c
 INCLUDE_DIR := include
@@ -29,11 +30,12 @@ SCHED_OBJ := $(BUILD_DIR)/kernel/sched.o
 SWITCH_OBJ := $(BUILD_DIR)/kernel/switch.o
 SYSTEM_CALL_OBJ := $(BUILD_DIR)/kernel/system_call.o
 FORK_OBJ := $(BUILD_DIR)/kernel/fork.o
+EXIT_OBJ := $(BUILD_DIR)/kernel/exit.o
 PANIC_OBJ := $(BUILD_DIR)/kernel/panic.o
 SERIAL_OBJ := $(BUILD_DIR)/kernel/serial.o
 EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(KERNEL_OBJ) $(MEMORY_OBJ) $(PAGE_OBJ) \
-	$(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) $(FORK_OBJ) $(PANIC_OBJ) \
-	$(SERIAL_OBJ)
+	$(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) $(FORK_OBJ) $(EXIT_OBJ) \
+	$(PANIC_OBJ) $(SERIAL_OBJ)
 EFI_IMAGE := $(BUILD_DIR)/BOOTX64.EFI
 ESP_IMAGE := $(BUILD_DIR)/esp.img
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -114,6 +116,10 @@ $(SYSTEM_CALL_OBJ): $(SYSTEM_CALL_SOURCE) | $(BUILD_DIR)/kernel
 
 $(FORK_OBJ): $(FORK_SOURCE) $(INCLUDE_DIR)/asm/ptrace.h \
 		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
+$(EXIT_OBJ): $(EXIT_SOURCE) $(INCLUDE_DIR)/asm/ptrace.h \
+		$(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
 $(PANIC_OBJ): $(PANIC_SOURCE) $(INCLUDE_DIR)/asm/serial.h \
