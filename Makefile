@@ -19,6 +19,7 @@ LD := ld
 OBJDUMP := objdump
 NM := nm
 READELF := readelf
+STRINGS := strings
 QEMU := qemu-system-x86_64
 
 UEFI_OBJ := $(BUILD_DIR)/uefi/main.o
@@ -41,6 +42,16 @@ ESP_IMAGE := $(BUILD_DIR)/esp.img
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS_TEMPLATE := /usr/share/OVMF/OVMF_VARS_4M.fd
 OVMF_VARS := $(BUILD_DIR)/OVMF_VARS_4M.fd
+
+TEST_BUILD_DIR := $(BUILD_DIR)/test
+TEST_KERNEL_OBJ := $(TEST_BUILD_DIR)/process.o
+TEST_USER_OBJ := $(TEST_BUILD_DIR)/process_user.o
+TEST_EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(TEST_KERNEL_OBJ) $(TEST_USER_OBJ) \
+	$(MEMORY_OBJ) $(PAGE_OBJ) $(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) \
+	$(FORK_OBJ) $(EXIT_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ)
+TEST_EFI_IMAGE := $(TEST_BUILD_DIR)/BOOTX64.EFI
+TEST_ESP_IMAGE := $(TEST_BUILD_DIR)/esp.img
+TEST_OVMF_VARS := $(TEST_BUILD_DIR)/OVMF_VARS_4M.fd
 
 X86_64_CFLAGS := \
 	-m64 \
@@ -68,7 +79,7 @@ X86_64_ASFLAGS := \
 	-mno-red-zone \
 	-I$(INCLUDE_DIR)
 
-.PHONY: all image check run clean
+.PHONY: all image check run test-process clean
 
 all: $(EFI_IMAGE)
 
@@ -85,6 +96,9 @@ $(BUILD_DIR)/kernel:
 	mkdir -p $@
 
 $(BUILD_DIR)/mm:
+	mkdir -p $@
+
+$(TEST_BUILD_DIR):
 	mkdir -p $@
 
 $(UEFI_OBJ): $(UEFI_DIR)/main.c $(UEFI_DIR)/efi.h \
@@ -129,6 +143,14 @@ $(PANIC_OBJ): $(PANIC_SOURCE) $(INCLUDE_DIR)/asm/serial.h \
 $(SERIAL_OBJ): $(SERIAL_SOURCE) $(INCLUDE_DIR)/asm/serial.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
+$(TEST_KERNEL_OBJ): tests/x86_64/process.c $(INCLUDE_DIR)/asm/boot.h \
+		$(INCLUDE_DIR)/asm/ptrace.h $(INCLUDE_DIR)/asm/serial.h \
+		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/sched.h | $(TEST_BUILD_DIR)
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
+$(TEST_USER_OBJ): tests/x86_64/process_user.S | $(TEST_BUILD_DIR)
+	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
+
 $(EFI_IMAGE): $(EFI_OBJS) | $(BUILD_DIR)
 	$(LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
 		--file-alignment 0x200 --section-alignment 0x1000 --stack 0x10000 \
@@ -145,6 +167,19 @@ $(ESP_IMAGE): $(EFI_IMAGE) | $(BUILD_DIR)
 
 $(OVMF_VARS): $(OVMF_VARS_TEMPLATE) | $(BUILD_DIR)
 	cp $< $@
+
+$(TEST_EFI_IMAGE): $(TEST_EFI_OBJS) | $(TEST_BUILD_DIR)
+	$(LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
+		--file-alignment 0x200 --section-alignment 0x1000 --stack 0x10000 \
+		-o $@ $(TEST_EFI_OBJS)
+
+$(TEST_ESP_IMAGE): $(TEST_EFI_IMAGE) | $(TEST_BUILD_DIR)
+	rm -f $@
+	truncate -s 64M $@
+	mformat -i $@ -F ::
+	mmd -i $@ ::/EFI
+	mmd -i $@ ::/EFI/BOOT
+	mcopy -i $@ $(TEST_EFI_IMAGE) ::/EFI/BOOT/BOOTX64.EFI
 
 image: $(ESP_IMAGE)
 
@@ -169,6 +204,11 @@ run: image $(OVMF_VARS)
 		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
 		-drive format=raw,file=$(ESP_IMAGE) \
 		-serial stdio -display none -monitor none -no-reboot -no-shutdown
+
+test-process: $(EFI_IMAGE) $(TEST_ESP_IMAGE)
+	@! $(STRINGS) $(EFI_IMAGE) | grep -q 'PROCESS TEST'
+	tests/x86_64/run-process.sh $(QEMU) $(OVMF_CODE) \
+		$(OVMF_VARS_TEMPLATE) $(TEST_OVMF_VARS) $(TEST_ESP_IMAGE)
 
 clean:
 	test "$(BUILD_DIR)" = "build/x86_64"
