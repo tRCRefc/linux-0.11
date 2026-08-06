@@ -36,6 +36,7 @@ extern struct task_struct *current
 extern void sched_init(void);
 extern void schedule(void);
 extern void switch_to(struct task_struct *next);
+extern long do_exit(long code);
 
 #else
 

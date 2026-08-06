@@ -6,6 +6,7 @@
 
 #include <linux/mm.h>
 #include <linux/kernel.h>
+#include <linux/sched.h>
 
 #define PAGING_MEMORY (15UL * 1024 * 1024)
 #define PAGING_PAGES (PAGING_MEMORY / PAGE_SIZE)
@@ -20,9 +21,24 @@
 #define PAGE_USER 0x004UL
 #define PAGE_TABLE_ENTRIES 512UL
 
+#define PAGE_FAULT_WRITE 0x002UL
+#define PAGE_FAULT_USER 0x004UL
+
 static unsigned long low_mem;
 static unsigned long high_mem;
 static unsigned char mem_map[PAGING_PAGES];
+
+static void bad_page(unsigned long error, const char *message)
+{
+    if (error & PAGE_FAULT_USER)
+        do_exit(SIGSEGV);
+    panic(message);
+}
+
+static void oom(unsigned long error)
+{
+    bad_page(error, "out of memory");
+}
 
 void mem_init(unsigned long start_mem, unsigned long end_mem)
 {
@@ -324,9 +340,10 @@ void do_wp_page(unsigned long error, unsigned long addr)
     unsigned long *to;
     unsigned long words;
 
-    (void)error;
+    if (!(error & PAGE_FAULT_WRITE))
+        bad_page(error, "unexpected page protection fault");
     if (addr < USER_ADDRESS_START || addr >= USER_ADDRESS_LIMIT)
-        panic("page fault outside user memory");
+        bad_page(error, "page fault outside user memory");
     __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
     pml4 = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
     pdpt = phys_to_virt(pml4[(addr >> 39) & 0x1ffUL] &
@@ -347,7 +364,7 @@ void do_wp_page(unsigned long error, unsigned long addr)
 
     new_page = get_free_page();
     if (new_page == 0)
-        panic("out of memory");
+        oom(error);
     from = phys_to_virt(old_page);
     to = phys_to_virt(new_page);
     words = PAGE_SIZE / sizeof(*from);
@@ -365,19 +382,18 @@ void do_no_page(unsigned long error, unsigned long addr)
     unsigned long cr3;
     unsigned long page;
 
-    (void)error;
     if (addr < USER_ADDRESS_START || addr >= USER_ADDRESS_LIMIT)
-        panic("page fault outside user memory");
+        bad_page(error, "page fault outside user memory");
     addr &= ~(PAGE_SIZE - 1UL);
 
     page = get_free_page();
     if (page == 0)
-        panic("out of memory");
+        oom(error);
 
     __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
     if (put_user_page(cr3 & PAGE_TABLE_ADDR_MASK, page, addr) == 0) {
         free_page(page);
-        panic("out of memory");
+        oom(error);
     }
 }
 

@@ -25,7 +25,7 @@ static void tell_father(long pid)
 	}
 }
 
-static long do_exit(long code)
+long do_exit(long code)
 {
 	current->state = TASK_ZOMBIE;
 	current->exit_code = code;
