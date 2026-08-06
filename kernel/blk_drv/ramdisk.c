@@ -4,6 +4,42 @@
  *  Written by Theodore Ts'o, 12/2/91
  */
 
+#ifdef __x86_64__
+
+#include <errno.h>
+#include <linux/minix.h>
+#include <linux/ramdisk.h>
+
+int rd_init(struct ramdisk *rd, const void *start, unsigned long length)
+{
+    if (!rd || !start || length < MINIX_BLOCK_SIZE ||
+        length % MINIX_BLOCK_SIZE)
+        return -EINVAL;
+    rd->start = start;
+    rd->length = length;
+    return 0;
+}
+
+int rd_read(void *context, unsigned long block, void *buffer)
+{
+    struct ramdisk *rd;
+    const unsigned char *from;
+    unsigned char *to;
+    unsigned long count;
+
+    rd = context;
+    if (!rd || !buffer || block >= rd->length / MINIX_BLOCK_SIZE)
+        return -EIO;
+    from = rd->start + block * MINIX_BLOCK_SIZE;
+    to = buffer;
+    count = MINIX_BLOCK_SIZE;
+    while (count-- > 0)
+        *to++ = *from++;
+    return 0;
+}
+
+#else
+
 #include <string.h>
 
 #include <linux/config.h>
@@ -123,3 +159,5 @@ void rd_load(void)
 	printk("\010\010\010\010\010done \n");
 	ROOT_DEV=0x0101;
 }
+
+#endif

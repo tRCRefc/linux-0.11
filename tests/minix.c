@@ -32,7 +32,8 @@ static void put_le32(unsigned char *p, unsigned long value)
 }
 
 static void put_inode(unsigned int ino, unsigned int mode,
-                      unsigned long size, const unsigned int zones[9])
+                      unsigned int nlinks, unsigned long size,
+                      const unsigned int zones[9])
 {
     unsigned char *raw;
     unsigned int i;
@@ -40,7 +41,7 @@ static void put_inode(unsigned int ino, unsigned int mode,
     raw = image[4] + (ino - 1) * 32;
     put_le16(raw + 0, mode);
     put_le32(raw + 4, size);
-    raw[13] = 1;
+    raw[13] = (unsigned char)nlinks;
     for (i = 0; i < 9; ++i)
         put_le16(raw + 14 + i * 2, zones[i]);
 }
@@ -91,12 +92,15 @@ static void make_image(void)
     put_le16(image[1] + 8, ROOT_BLOCK);
     put_le32(image[1] + 12, 0x100000);
     put_le16(image[1] + 16, MINIX_SUPER_MAGIC);
+    image[2][0] = 0x3f;
+    image[3][0] = 0xff;
+    image[3][1] = 0xff;
 
-    put_inode(1, 0040755, 5 * 16, root_zones);
-    put_inode(2, 0040755, 3 * 16, bin_zones);
-    put_inode(3, 0100755, sizeof(init_data) - 1, init_zones);
-    put_inode(4, 0100644, 8 * MINIX_BLOCK_SIZE, large_zones);
-    put_inode(5, 0100644, 520 * MINIX_BLOCK_SIZE, huge_zones);
+    put_inode(1, 0040755, 3, 5 * 16, root_zones);
+    put_inode(2, 0040755, 2, 3 * 16, bin_zones);
+    put_inode(3, 0100755, 1, sizeof(init_data) - 1, init_zones);
+    put_inode(4, 0100644, 1, 8 * MINIX_BLOCK_SIZE, large_zones);
+    put_inode(5, 0100644, 1, 520 * MINIX_BLOCK_SIZE, huge_zones);
 
     put_dir(ROOT_BLOCK, 0, 1, ".");
     put_dir(ROOT_BLOCK, 1, 1, "..");
@@ -125,7 +129,7 @@ static int expect(int condition, const char *message)
     return 1;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     static const char init_data[] = "minix init image\n";
     struct minix_inode inode;
@@ -136,6 +140,29 @@ int main(void)
     long bytes;
 
     make_image();
+    if (argc == 3 && !strcmp(argv[1], "--write")) {
+        FILE *file;
+        int write_failed;
+
+        file = fopen(argv[2], "wb");
+        if (!file) {
+            perror(argv[2]);
+            return 1;
+        }
+        write_failed = fwrite(image, sizeof(image), 1, file) != 1;
+        if (fclose(file))
+            write_failed = 1;
+        if (write_failed) {
+            fprintf(stderr, "cannot write Minix image: %s\n", argv[2]);
+            return 1;
+        }
+        printf("MINIX IMAGE: %s (%zu bytes)\n", argv[2], sizeof(image));
+        return 0;
+    }
+    if (argc != 1) {
+        fprintf(stderr, "usage: %s [--write image]\n", argv[0]);
+        return 1;
+    }
     blocks = IMAGE_BLOCKS;
     failed = expect(minix_mount(&fs, image_read, &blocks) == 0,
                     "mount valid image");

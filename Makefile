@@ -13,6 +13,7 @@ EXIT_SOURCE := kernel/exit.c
 PANIC_SOURCE := kernel/panic.c
 SERIAL_SOURCE := kernel/chr_drv/serial.c
 MINIX_SOURCE := fs/minix.c
+RAMDISK_SOURCE := kernel/blk_drv/ramdisk.c
 INCLUDE_DIR := include
 
 CC := gcc
@@ -21,6 +22,7 @@ OBJDUMP := objdump
 NM := nm
 READELF := readelf
 STRINGS := strings
+FSCK_MINIX := fsck.minix
 QEMU := qemu-system-x86_64
 
 UEFI_OBJ := $(BUILD_DIR)/uefi/main.o
@@ -36,9 +38,10 @@ EXIT_OBJ := $(BUILD_DIR)/kernel/exit.o
 PANIC_OBJ := $(BUILD_DIR)/kernel/panic.o
 SERIAL_OBJ := $(BUILD_DIR)/kernel/serial.o
 MINIX_OBJ := $(BUILD_DIR)/fs/minix.o
+RAMDISK_OBJ := $(BUILD_DIR)/kernel/ramdisk.o
 EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(KERNEL_OBJ) $(MEMORY_OBJ) $(PAGE_OBJ) \
 	$(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) $(FORK_OBJ) $(EXIT_OBJ) \
-	$(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ)
+	$(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ) $(RAMDISK_OBJ)
 EFI_IMAGE := $(BUILD_DIR)/BOOTX64.EFI
 ESP_IMAGE := $(BUILD_DIR)/esp.img
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -50,11 +53,21 @@ TEST_KERNEL_OBJ := $(TEST_BUILD_DIR)/process.o
 TEST_USER_OBJ := $(TEST_BUILD_DIR)/process_user.o
 TEST_EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(TEST_KERNEL_OBJ) $(TEST_USER_OBJ) \
 	$(MEMORY_OBJ) $(PAGE_OBJ) $(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) \
-	$(FORK_OBJ) $(EXIT_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ)
+	$(FORK_OBJ) $(EXIT_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ) \
+	$(RAMDISK_OBJ)
 TEST_EFI_IMAGE := $(TEST_BUILD_DIR)/BOOTX64.EFI
 TEST_ESP_IMAGE := $(TEST_BUILD_DIR)/esp.img
 TEST_OVMF_VARS := $(TEST_BUILD_DIR)/OVMF_VARS_4M.fd
 TEST_MINIX := $(TEST_BUILD_DIR)/minix-test
+TEST_ROOT_IMAGE := $(TEST_BUILD_DIR)/root.img
+TEST_FS_KERNEL_OBJ := $(TEST_BUILD_DIR)/fs.o
+TEST_FS_EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(TEST_FS_KERNEL_OBJ) \
+	$(MEMORY_OBJ) $(PAGE_OBJ) $(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) \
+	$(FORK_OBJ) $(EXIT_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ) \
+	$(RAMDISK_OBJ)
+TEST_FS_EFI_IMAGE := $(TEST_BUILD_DIR)/FSX64.EFI
+TEST_FS_ESP_IMAGE := $(TEST_BUILD_DIR)/fs-esp.img
+TEST_FS_OVMF_VARS := $(TEST_BUILD_DIR)/FS_OVMF_VARS_4M.fd
 
 X86_64_CFLAGS := \
 	-m64 \
@@ -82,7 +95,7 @@ X86_64_ASFLAGS := \
 	-mno-red-zone \
 	-I$(INCLUDE_DIR)
 
-.PHONY: all image check run test-minix test-process clean
+.PHONY: all image check run test-fs test-minix test-process clean
 
 all: $(EFI_IMAGE)
 
@@ -152,6 +165,10 @@ $(SERIAL_OBJ): $(SERIAL_SOURCE) $(INCLUDE_DIR)/asm/serial.h | $(BUILD_DIR)/kerne
 $(MINIX_OBJ): $(MINIX_SOURCE) $(INCLUDE_DIR)/linux/minix.h | $(BUILD_DIR)/fs
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
+$(RAMDISK_OBJ): $(RAMDISK_SOURCE) $(INCLUDE_DIR)/linux/minix.h \
+		$(INCLUDE_DIR)/linux/ramdisk.h | $(BUILD_DIR)/kernel
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
 $(TEST_KERNEL_OBJ): tests/x86_64/process.c $(INCLUDE_DIR)/asm/boot.h \
 		$(INCLUDE_DIR)/asm/ptrace.h $(INCLUDE_DIR)/asm/serial.h \
 		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/sched.h | $(TEST_BUILD_DIR)
@@ -160,9 +177,18 @@ $(TEST_KERNEL_OBJ): tests/x86_64/process.c $(INCLUDE_DIR)/asm/boot.h \
 $(TEST_USER_OBJ): tests/x86_64/process_user.S | $(TEST_BUILD_DIR)
 	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
 
+$(TEST_FS_KERNEL_OBJ): tests/x86_64/fs.c $(INCLUDE_DIR)/asm/boot.h \
+		$(INCLUDE_DIR)/asm/serial.h $(INCLUDE_DIR)/linux/minix.h \
+		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/ramdisk.h | $(TEST_BUILD_DIR)
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
 $(TEST_MINIX): $(MINIX_SOURCE) tests/minix.c $(INCLUDE_DIR)/linux/minix.h | $(TEST_BUILD_DIR)
 	$(CC) -std=c11 -Wall -Wextra -Werror -idirafter $(INCLUDE_DIR) \
 		$(MINIX_SOURCE) tests/minix.c -o $@
+
+$(TEST_ROOT_IMAGE): $(TEST_MINIX) | $(TEST_BUILD_DIR)
+	$(TEST_MINIX) --write $@
+	$(FSCK_MINIX) -f $@
 
 $(EFI_IMAGE): $(EFI_OBJS) | $(BUILD_DIR)
 	$(LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
@@ -193,6 +219,19 @@ $(TEST_ESP_IMAGE): $(TEST_EFI_IMAGE) | $(TEST_BUILD_DIR)
 	mmd -i $@ ::/EFI
 	mmd -i $@ ::/EFI/BOOT
 	mcopy -i $@ $(TEST_EFI_IMAGE) ::/EFI/BOOT/BOOTX64.EFI
+
+$(TEST_FS_EFI_IMAGE): $(TEST_FS_EFI_OBJS) | $(TEST_BUILD_DIR)
+	$(LD) -mi386pep --subsystem 10 --entry efi_main --image-base 0 \
+		--file-alignment 0x200 --section-alignment 0x1000 --stack 0x10000 \
+		-o $@ $(TEST_FS_EFI_OBJS)
+
+$(TEST_FS_ESP_IMAGE): $(TEST_FS_EFI_IMAGE) | $(TEST_BUILD_DIR)
+	rm -f $@
+	truncate -s 64M $@
+	mformat -i $@ -F ::
+	mmd -i $@ ::/EFI
+	mmd -i $@ ::/EFI/BOOT
+	mcopy -i $@ $(TEST_FS_EFI_IMAGE) ::/EFI/BOOT/BOOTX64.EFI
 
 image: $(ESP_IMAGE)
 
@@ -225,6 +264,12 @@ test-process: $(EFI_IMAGE) $(TEST_ESP_IMAGE)
 
 test-minix: $(TEST_MINIX)
 	$(TEST_MINIX)
+
+test-fs: $(EFI_IMAGE) $(TEST_ROOT_IMAGE) $(TEST_FS_ESP_IMAGE)
+	@! $(STRINGS) $(EFI_IMAGE) | grep -Eq 'FS TEST|minix init image'
+	tests/x86_64/run-fs.sh $(QEMU) $(OVMF_CODE) \
+		$(OVMF_VARS_TEMPLATE) $(TEST_FS_OVMF_VARS) \
+		$(TEST_FS_ESP_IMAGE) $(TEST_ROOT_IMAGE)
 
 clean:
 	test "$(BUILD_DIR)" = "build/x86_64"
