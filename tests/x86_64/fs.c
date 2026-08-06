@@ -1,10 +1,10 @@
 #include <asm/boot.h>
 #include <asm/serial.h>
+#include <linux/hd.h>
 #include <linux/minix.h>
 #include <linux/mm.h>
 #include <linux/ramdisk.h>
 
-#define RAMDISK_PHYS 0x04000000UL
 #define RAMDISK_SIZE (64UL * MINIX_BLOCK_SIZE)
 #define TEST_EXIT_SUCCESS 0x10U
 #define TEST_EXIT_FAILURE 0x11U
@@ -38,16 +38,22 @@ void __attribute__((noreturn))
 x86_64_kernel_main(const struct boot_info *boot_info)
 {
     static const char expected[] = "minix init image\n";
+    struct hard_disk disk;
     struct minix_inode inode;
     struct minix_fs fs;
     struct ramdisk rd;
     char data[sizeof(expected)];
     long bytes;
 
-    (void)boot_info;
     serial_write("FS TEST START\r\n");
-    if (rd_init(&rd, phys_to_virt(RAMDISK_PHYS), RAMDISK_SIZE))
+    if (boot_info->mem_end - boot_info->mem_start <= RAMDISK_SIZE)
+        fail("ramdisk memory");
+    if (rd_init(&rd, phys_to_virt(boot_info->mem_start), RAMDISK_SIZE))
         fail("ramdisk init");
+    mem_init(boot_info->mem_start + RAMDISK_SIZE, boot_info->mem_end);
+    if (hd_init(&disk, 1) || rd_load(&rd, hd_read, &disk))
+        fail("load root disk");
+    serial_write("FS PASS: ATA root input\r\n");
     if (rd_read(&rd, RAMDISK_SIZE / MINIX_BLOCK_SIZE, data) == 0)
         fail("ramdisk accepted an out-of-range block");
     serial_write("FS PASS: ramdisk bounds\r\n");

@@ -14,6 +14,7 @@ PANIC_SOURCE := kernel/panic.c
 SERIAL_SOURCE := kernel/chr_drv/serial.c
 MINIX_SOURCE := fs/minix.c
 RAMDISK_SOURCE := kernel/blk_drv/ramdisk.c
+HD_SOURCE := kernel/blk_drv/hd.c
 INCLUDE_DIR := include
 
 CC := gcc
@@ -39,9 +40,10 @@ PANIC_OBJ := $(BUILD_DIR)/kernel/panic.o
 SERIAL_OBJ := $(BUILD_DIR)/kernel/serial.o
 MINIX_OBJ := $(BUILD_DIR)/fs/minix.o
 RAMDISK_OBJ := $(BUILD_DIR)/kernel/ramdisk.o
+HD_OBJ := $(BUILD_DIR)/kernel/hd.o
 EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(KERNEL_OBJ) $(MEMORY_OBJ) $(PAGE_OBJ) \
 	$(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) $(FORK_OBJ) $(EXIT_OBJ) \
-	$(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ) $(RAMDISK_OBJ)
+	$(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ) $(RAMDISK_OBJ) $(HD_OBJ)
 EFI_IMAGE := $(BUILD_DIR)/BOOTX64.EFI
 ESP_IMAGE := $(BUILD_DIR)/esp.img
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
@@ -54,7 +56,7 @@ TEST_USER_OBJ := $(TEST_BUILD_DIR)/process_user.o
 TEST_EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(TEST_KERNEL_OBJ) $(TEST_USER_OBJ) \
 	$(MEMORY_OBJ) $(PAGE_OBJ) $(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) \
 	$(FORK_OBJ) $(EXIT_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ) \
-	$(RAMDISK_OBJ)
+	$(RAMDISK_OBJ) $(HD_OBJ)
 TEST_EFI_IMAGE := $(TEST_BUILD_DIR)/BOOTX64.EFI
 TEST_ESP_IMAGE := $(TEST_BUILD_DIR)/esp.img
 TEST_OVMF_VARS := $(TEST_BUILD_DIR)/OVMF_VARS_4M.fd
@@ -64,7 +66,7 @@ TEST_FS_KERNEL_OBJ := $(TEST_BUILD_DIR)/fs.o
 TEST_FS_EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(TEST_FS_KERNEL_OBJ) \
 	$(MEMORY_OBJ) $(PAGE_OBJ) $(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) \
 	$(FORK_OBJ) $(EXIT_OBJ) $(PANIC_OBJ) $(SERIAL_OBJ) $(MINIX_OBJ) \
-	$(RAMDISK_OBJ)
+	$(RAMDISK_OBJ) $(HD_OBJ)
 TEST_FS_EFI_IMAGE := $(TEST_BUILD_DIR)/FSX64.EFI
 TEST_FS_ESP_IMAGE := $(TEST_BUILD_DIR)/fs-esp.img
 TEST_FS_OVMF_VARS := $(TEST_BUILD_DIR)/FS_OVMF_VARS_4M.fd
@@ -128,7 +130,9 @@ $(HEAD_OBJ): $(BOOT_DIR)/head.S | $(BUILD_DIR)/boot
 	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
 
 $(KERNEL_OBJ): $(KERNEL_MAIN) $(INCLUDE_DIR)/asm/boot.h \
-		$(INCLUDE_DIR)/asm/serial.h $(INCLUDE_DIR)/linux/mm.h | $(BUILD_DIR)/kernel
+		$(INCLUDE_DIR)/asm/serial.h $(INCLUDE_DIR)/linux/hd.h \
+		$(INCLUDE_DIR)/linux/minix.h $(INCLUDE_DIR)/linux/mm.h \
+		$(INCLUDE_DIR)/linux/ramdisk.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
 $(MEMORY_OBJ): $(MEMORY_SOURCE) $(INCLUDE_DIR)/linux/mm.h | $(BUILD_DIR)/mm
@@ -169,6 +173,10 @@ $(RAMDISK_OBJ): $(RAMDISK_SOURCE) $(INCLUDE_DIR)/linux/minix.h \
 		$(INCLUDE_DIR)/linux/ramdisk.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
+$(HD_OBJ): $(HD_SOURCE) $(INCLUDE_DIR)/linux/hd.h \
+		$(INCLUDE_DIR)/linux/hdreg.h | $(BUILD_DIR)/kernel
+	$(CC) $(X86_64_CFLAGS) -c $< -o $@
+
 $(TEST_KERNEL_OBJ): tests/x86_64/process.c $(INCLUDE_DIR)/asm/boot.h \
 		$(INCLUDE_DIR)/asm/ptrace.h $(INCLUDE_DIR)/asm/serial.h \
 		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/sched.h | $(TEST_BUILD_DIR)
@@ -178,13 +186,15 @@ $(TEST_USER_OBJ): tests/x86_64/process_user.S | $(TEST_BUILD_DIR)
 	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
 
 $(TEST_FS_KERNEL_OBJ): tests/x86_64/fs.c $(INCLUDE_DIR)/asm/boot.h \
-		$(INCLUDE_DIR)/asm/serial.h $(INCLUDE_DIR)/linux/minix.h \
+		$(INCLUDE_DIR)/asm/serial.h $(INCLUDE_DIR)/linux/hd.h \
+		$(INCLUDE_DIR)/linux/minix.h \
 		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/ramdisk.h | $(TEST_BUILD_DIR)
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
-$(TEST_MINIX): $(MINIX_SOURCE) tests/minix.c $(INCLUDE_DIR)/linux/minix.h | $(TEST_BUILD_DIR)
+$(TEST_MINIX): $(MINIX_SOURCE) $(RAMDISK_SOURCE) tests/minix.c \
+		$(INCLUDE_DIR)/linux/minix.h $(INCLUDE_DIR)/linux/ramdisk.h | $(TEST_BUILD_DIR)
 	$(CC) -std=c11 -Wall -Wextra -Werror -idirafter $(INCLUDE_DIR) \
-		$(MINIX_SOURCE) tests/minix.c -o $@
+		$(MINIX_SOURCE) $(RAMDISK_SOURCE) tests/minix.c -o $@
 
 $(TEST_ROOT_IMAGE): $(TEST_MINIX) | $(TEST_BUILD_DIR)
 	$(TEST_MINIX) --write $@
@@ -250,11 +260,12 @@ check: $(EFI_IMAGE)
 	@! $(READELF) -r $(EFI_OBJS) | \
 		grep -Eq 'R_X86_64_(32|32S)([[:space:]]|$$)'
 
-run: image $(OVMF_VARS)
+run: image $(OVMF_VARS) $(TEST_ROOT_IMAGE)
 	$(QEMU) \
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
-		-drive format=raw,file=$(ESP_IMAGE) \
+		-drive if=ide,index=0,format=raw,file=$(ESP_IMAGE) \
+		-drive if=ide,index=1,format=raw,file=$(TEST_ROOT_IMAGE) \
 		-serial stdio -display none -monitor none -no-reboot -no-shutdown
 
 test-process: $(EFI_IMAGE) $(TEST_ESP_IMAGE)

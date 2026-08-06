@@ -10,13 +10,50 @@
 #include <linux/minix.h>
 #include <linux/ramdisk.h>
 
-int rd_init(struct ramdisk *rd, const void *start, unsigned long length)
+static __UINT16_TYPE__ get_le16(const unsigned char *p)
+{
+    return (__UINT16_TYPE__)(p[0] | ((__UINT16_TYPE__)p[1] << 8));
+}
+
+int rd_init(struct ramdisk *rd, void *start, unsigned long length)
 {
     if (!rd || !start || length < MINIX_BLOCK_SIZE ||
         length % MINIX_BLOCK_SIZE)
         return -EINVAL;
     rd->start = start;
-    rd->length = length;
+    rd->length = 0;
+    rd->capacity = length;
+    while (length-- > 0)
+        rd->start[length] = 0;
+    return 0;
+}
+
+int rd_load(struct ramdisk *rd, minix_read_block_t read_block, void *context)
+{
+    unsigned char super[MINIX_BLOCK_SIZE];
+    unsigned long blocks;
+    unsigned long block;
+    unsigned int log_zone_size;
+
+    if (!rd || !read_block || !rd->start || !rd->capacity)
+        return -EINVAL;
+    rd->length = 0;
+    if (read_block(context, 1, super) < 0)
+        return -EIO;
+    if (get_le16(super + 16) != MINIX_SUPER_MAGIC)
+        return -EINVAL;
+    log_zone_size = get_le16(super + 10);
+    if (log_zone_size >= 8 * sizeof(blocks))
+        return -EINVAL;
+    blocks = (unsigned long)get_le16(super + 2) << log_zone_size;
+    if (!blocks || blocks > rd->capacity / MINIX_BLOCK_SIZE)
+        return -ENOSPC;
+    for (block = 0; block < blocks; ++block) {
+        if (read_block(context, block,
+                       rd->start + block * MINIX_BLOCK_SIZE) < 0)
+            return -EIO;
+    }
+    rd->length = blocks * MINIX_BLOCK_SIZE;
     return 0;
 }
 

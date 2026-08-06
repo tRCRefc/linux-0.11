@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include <linux/minix.h>
+#include <linux/ramdisk.h>
 
 #define IMAGE_BLOCKS 64
 #define ROOT_BLOCK 5
@@ -132,8 +133,11 @@ static int expect(int condition, const char *message)
 int main(int argc, char **argv)
 {
     static const char init_data[] = "minix init image\n";
+    static unsigned char ramdisk_data[sizeof(image)];
+    unsigned char ramdisk_block[MINIX_BLOCK_SIZE];
     struct minix_inode inode;
     struct minix_fs fs;
+    struct ramdisk rd;
     unsigned long blocks;
     unsigned char data[32];
     int failed;
@@ -202,11 +206,33 @@ int main(int argc, char **argv)
     failed |= expect(minix_mount(&fs, image_read, &blocks) == -EIO,
                      "reject truncated image");
 
+    make_image();
+    blocks = IMAGE_BLOCKS;
+    failed |= expect(rd_init(&rd, ramdisk_data, sizeof(ramdisk_data)) == 0,
+                     "initialize ramdisk storage");
+    failed |= expect(rd_load(&rd, image_read, &blocks) == 0 &&
+                     rd.length == sizeof(image), "load ramdisk image");
+    failed |= expect(rd_read(&rd, 0, ramdisk_block) == 0 &&
+                     !memcmp(ramdisk_block, image[0], MINIX_BLOCK_SIZE),
+                     "read loaded ramdisk image");
+    put_le16(image[1] + 16, 0);
+    failed |= expect(rd_load(&rd, image_read, &blocks) == -EINVAL &&
+                     rd.length == 0, "reject ramdisk with bad magic");
+    make_image();
+    put_le16(image[1] + 2, IMAGE_BLOCKS + 1);
+    failed |= expect(rd_load(&rd, image_read, &blocks) == -ENOSPC &&
+                     rd.length == 0, "reject oversized ramdisk image");
+    make_image();
+    blocks = IMAGE_BLOCKS / 2;
+    failed |= expect(rd_load(&rd, image_read, &blocks) == -EIO &&
+                     rd.length == 0, "reject truncated ramdisk image");
+
     if (failed)
         return 1;
     puts("MINIX TEST PASS: superblock and inode");
     puts("MINIX TEST PASS: directory lookup");
     puts("MINIX TEST PASS: direct and indirect reads");
     puts("MINIX TEST PASS: malformed images");
+    puts("MINIX TEST PASS: ramdisk loading errors");
     return 0;
 }

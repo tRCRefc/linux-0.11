@@ -13,6 +13,91 @@
  *  modified by Drew Eckhardt to check nr of hd's from the CMOS.
  */
 
+#ifdef __x86_64__
+
+#include <errno.h>
+#include <linux/hd.h>
+#include <linux/hdreg.h>
+
+#define ATA_LBA28_LIMIT (1UL << 28)
+#define ATA_POLL_LIMIT 1000000UL
+
+static inline void outb(unsigned short port, unsigned char value)
+{
+    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
+}
+
+static inline unsigned char inb(unsigned short port)
+{
+    unsigned char value;
+
+    __asm__ volatile ("inb %1, %0" : "=a"(value) : "Nd"(port));
+    return value;
+}
+
+static void insw(unsigned short port, void *buffer, unsigned long count)
+{
+    __asm__ volatile ("cld; rep insw"
+                      : "+D"(buffer), "+c"(count)
+                      : "d"(port)
+                      : "memory");
+}
+
+static int wait_for_data(void)
+{
+    unsigned long attempt;
+
+    for (attempt = 0; attempt < ATA_POLL_LIMIT; ++attempt) {
+        unsigned char status = inb(HD_STATUS);
+
+        if (status & ERR_STAT)
+            return -EIO;
+        if (!(status & BUSY_STAT) && (status & DRQ_STAT))
+            return 0;
+    }
+    return -EIO;
+}
+
+int hd_init(struct hard_disk *disk, unsigned int drive)
+{
+    if (!disk || drive > 1)
+        return -EINVAL;
+    disk->drive = drive;
+    return 0;
+}
+
+int hd_read(void *context, unsigned long block, void *buffer)
+{
+    struct hard_disk *disk = context;
+    unsigned long lba;
+    unsigned int sector;
+    unsigned char *to = buffer;
+
+    if (!disk || !buffer || block >= ATA_LBA28_LIMIT / 2)
+        return -EINVAL;
+    lba = block * 2;
+    outb(HD_CURRENT, (unsigned char)(0xe0 | (disk->drive << 4) |
+                                     ((lba >> 24) & 0x0f)));
+    inb(HD_CMD);
+    inb(HD_CMD);
+    inb(HD_CMD);
+    inb(HD_CMD);
+    outb(HD_NSECTOR, 2);
+    outb(HD_SECTOR, (unsigned char)lba);
+    outb(HD_LCYL, (unsigned char)(lba >> 8));
+    outb(HD_HCYL, (unsigned char)(lba >> 16));
+    outb(HD_COMMAND, WIN_READ);
+    for (sector = 0; sector < 2; ++sector) {
+        if (wait_for_data())
+            return -EIO;
+        insw(HD_DATA, to, 256);
+        to += 512;
+    }
+    return 0;
+}
+
+#else
+
 #include <linux/config.h>
 #include <linux/sched.h>
 #include <linux/fs.h>
@@ -354,3 +439,5 @@ void hd_init(void)
 	outb_p(inb_p(0x21)&0xfb,0x21);                      // 复位接联的主8259A int2的屏蔽位
 	outb(inb_p(0xA1)&0xbf,0xA1);                        // 复位硬盘中断请求屏蔽位(在从片上)
 }
+
+#endif
