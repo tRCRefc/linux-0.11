@@ -132,6 +132,14 @@ unsigned long new_pg_dir(void)
     return page;
 }
 
+static void invalidate(void)
+{
+    unsigned long cr3;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+    __asm__ volatile ("movq %0, %%cr3" :: "r" (cr3) : "memory");
+}
+
 static void free_pt(unsigned long page)
 {
     unsigned long *pt;
@@ -171,7 +179,7 @@ static void free_pdpt(unsigned long page)
     free_page(page);
 }
 
-void free_pg_dir(unsigned long page)
+void free_user_pages(unsigned long page)
 {
     unsigned long *pg_dir;
     unsigned long i;
@@ -179,18 +187,21 @@ void free_pg_dir(unsigned long page)
     pg_dir = phys_to_virt(page);
     for (i = USER_ADDRESS_START >> 39;
          i < USER_ADDRESS_LIMIT >> 39; ++i) {
-        if (pg_dir[i] & PAGE_PRESENT)
-            free_pdpt(pg_dir[i] & PAGE_TABLE_ADDR_MASK);
+        unsigned long entry;
+
+        entry = pg_dir[i];
+        if (!(entry & PAGE_PRESENT))
+            continue;
+        pg_dir[i] = 0;
+        free_pdpt(entry & PAGE_TABLE_ADDR_MASK);
     }
-    free_page(page);
+    invalidate();
 }
 
-static void invalidate(void)
+void free_pg_dir(unsigned long page)
 {
-    unsigned long cr3;
-
-    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
-    __asm__ volatile ("movq %0, %%cr3" :: "r" (cr3) : "memory");
+    free_user_pages(page);
+    free_page(page);
 }
 
 static unsigned long copy_pt(unsigned long from)
@@ -309,7 +320,6 @@ unsigned long copy_pg_dir(unsigned long from)
         pdpt = copy_pdpt(entry & PAGE_TABLE_ADDR_MASK);
         if (pdpt == 0) {
             free_pg_dir(to);
-            invalidate();
             return 0;
         }
         to_dir[i] = pdpt | (entry & ~PAGE_TABLE_ADDR_MASK);

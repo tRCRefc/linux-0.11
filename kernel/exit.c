@@ -27,6 +27,7 @@ static void tell_father(long pid)
 
 long do_exit(long code)
 {
+	free_user_pages(current->pg_dir);
 	current->state = TASK_ZOMBIE;
 	current->exit_code = code;
 	tell_father(current->father);
