@@ -67,6 +67,10 @@ TEST_MINIX := $(TEST_BUILD_DIR)/minix-test
 TEST_ROOT_IMAGE := $(TEST_BUILD_DIR)/root.img
 TEST_INIT_OBJ := $(TEST_BUILD_DIR)/init.o
 TEST_INIT_ELF := $(TEST_BUILD_DIR)/init
+TEST_INIT_EXIT_OBJ := $(TEST_BUILD_DIR)/init-exit.o
+TEST_INIT_EXIT_ELF := $(TEST_BUILD_DIR)/init-exit
+TEST_INIT_ROOT_IMAGE := $(TEST_BUILD_DIR)/init-root.img
+TEST_INIT_OVMF_VARS := $(TEST_BUILD_DIR)/INIT_OVMF_VARS_4M.fd
 TEST_FS_KERNEL_OBJ := $(TEST_BUILD_DIR)/fs.o
 TEST_FS_EFI_OBJS := $(UEFI_OBJ) $(HEAD_OBJ) $(TEST_FS_KERNEL_OBJ) \
 	$(MEMORY_OBJ) $(PAGE_OBJ) $(SCHED_OBJ) $(SWITCH_OBJ) $(SYSTEM_CALL_OBJ) \
@@ -111,7 +115,7 @@ X86_64_ASFLAGS := \
 	-mno-red-zone \
 	-I$(INCLUDE_DIR)
 
-.PHONY: all image check run test-exec test-fs test-minix test-process clean
+.PHONY: all image check run test-exec test-fs test-init test-minix test-process clean
 
 all: $(EFI_IMAGE)
 
@@ -146,7 +150,8 @@ $(HEAD_OBJ): $(BOOT_DIR)/head.S | $(BUILD_DIR)/boot
 $(KERNEL_OBJ): $(KERNEL_MAIN) $(INCLUDE_DIR)/asm/boot.h \
 		$(INCLUDE_DIR)/asm/serial.h $(INCLUDE_DIR)/linux/hd.h \
 		$(INCLUDE_DIR)/linux/minix.h $(INCLUDE_DIR)/linux/mm.h \
-		$(INCLUDE_DIR)/linux/exec.h $(INCLUDE_DIR)/linux/ramdisk.h | $(BUILD_DIR)/kernel
+		$(INCLUDE_DIR)/linux/exec.h $(INCLUDE_DIR)/linux/ramdisk.h \
+		$(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
 $(MEMORY_OBJ): $(MEMORY_SOURCE) $(INCLUDE_DIR)/linux/mm.h | $(BUILD_DIR)/mm
@@ -166,11 +171,13 @@ $(SYSTEM_CALL_OBJ): $(SYSTEM_CALL_SOURCE) | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
 
 $(FORK_OBJ): $(FORK_SOURCE) $(INCLUDE_DIR)/asm/ptrace.h \
-		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
+		$(INCLUDE_DIR)/linux/exec.h $(INCLUDE_DIR)/linux/mm.h \
+		$(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
 $(EXIT_OBJ): $(EXIT_SOURCE) $(INCLUDE_DIR)/asm/ptrace.h \
-		$(INCLUDE_DIR)/linux/mm.h $(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
+		$(INCLUDE_DIR)/linux/kernel.h $(INCLUDE_DIR)/linux/mm.h \
+		$(INCLUDE_DIR)/linux/sched.h | $(BUILD_DIR)/kernel
 	$(CC) $(X86_64_CFLAGS) -c $< -o $@
 
 $(PANIC_OBJ): $(PANIC_SOURCE) $(INCLUDE_DIR)/asm/serial.h \
@@ -224,9 +231,19 @@ $(TEST_EXEC_USER_OBJ): tests/x86_64/exec_user.S | $(TEST_BUILD_DIR)
 $(TEST_INIT_OBJ): tests/x86_64/init.S | $(TEST_BUILD_DIR)
 	$(CC) $(X86_64_ASFLAGS) -c $< -o $@
 
+$(TEST_INIT_EXIT_OBJ): tests/x86_64/init.S | $(TEST_BUILD_DIR)
+	$(CC) $(X86_64_ASFLAGS) -DINIT_TEST_EXIT -c $< -o $@
+
 $(TEST_INIT_ELF): $(TEST_INIT_OBJ) tests/x86_64/init.ld
 	$(LD) -m elf_x86_64 -nostdlib -static -T tests/x86_64/init.ld \
 		-o $@ $(TEST_INIT_OBJ)
+	@$(READELF) -h $@ | grep -q 'Class:[[:space:]]*ELF64'
+	@$(READELF) -h $@ | grep -q 'Machine:[[:space:]]*Advanced Micro Devices X86-64'
+	@$(READELF) -l $@ | grep -q 'LOAD'
+
+$(TEST_INIT_EXIT_ELF): $(TEST_INIT_EXIT_OBJ) tests/x86_64/init.ld
+	$(LD) -m elf_x86_64 -nostdlib -static -T tests/x86_64/init.ld \
+		-o $@ $(TEST_INIT_EXIT_OBJ)
 	@$(READELF) -h $@ | grep -q 'Class:[[:space:]]*ELF64'
 	@$(READELF) -h $@ | grep -q 'Machine:[[:space:]]*Advanced Micro Devices X86-64'
 	@$(READELF) -l $@ | grep -q 'LOAD'
@@ -238,6 +255,10 @@ $(TEST_MINIX): $(MINIX_SOURCE) $(RAMDISK_SOURCE) tests/minix.c \
 
 $(TEST_ROOT_IMAGE): $(TEST_MINIX) $(TEST_INIT_ELF) | $(TEST_BUILD_DIR)
 	$(TEST_MINIX) --write $@ $(TEST_INIT_ELF)
+	$(FSCK_MINIX) -f $@
+
+$(TEST_INIT_ROOT_IMAGE): $(TEST_MINIX) $(TEST_INIT_EXIT_ELF) | $(TEST_BUILD_DIR)
+	$(TEST_MINIX) --write $@ $(TEST_INIT_EXIT_ELF)
 	$(FSCK_MINIX) -f $@
 
 $(EFI_IMAGE): $(EFI_OBJS) | $(BUILD_DIR)
@@ -326,11 +347,16 @@ test-process: $(EFI_IMAGE) $(TEST_ESP_IMAGE)
 	tests/x86_64/run-process.sh $(QEMU) $(OVMF_CODE) \
 		$(OVMF_VARS_TEMPLATE) $(TEST_OVMF_VARS) $(TEST_ESP_IMAGE)
 
-test-exec: $(EFI_IMAGE) $(TEST_ROOT_IMAGE) $(TEST_EXEC_ESP_IMAGE)
+test-exec: $(EFI_IMAGE) $(TEST_INIT_ROOT_IMAGE) $(TEST_EXEC_ESP_IMAGE)
 	@! $(STRINGS) $(EFI_IMAGE) | grep -q 'EXEC TEST'
 	tests/x86_64/run-exec.sh $(QEMU) $(OVMF_CODE) \
 		$(OVMF_VARS_TEMPLATE) $(TEST_EXEC_OVMF_VARS) \
-		$(TEST_EXEC_ESP_IMAGE) $(TEST_ROOT_IMAGE)
+		$(TEST_EXEC_ESP_IMAGE) $(TEST_INIT_ROOT_IMAGE)
+
+test-init: $(ESP_IMAGE) $(TEST_INIT_ROOT_IMAGE)
+	tests/x86_64/run-init.sh $(QEMU) $(OVMF_CODE) \
+		$(OVMF_VARS_TEMPLATE) $(TEST_INIT_OVMF_VARS) \
+		$(ESP_IMAGE) $(TEST_INIT_ROOT_IMAGE)
 
 test-minix: $(TEST_MINIX)
 	$(TEST_MINIX)

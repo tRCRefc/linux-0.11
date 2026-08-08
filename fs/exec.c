@@ -124,6 +124,52 @@ static int copy_args(const struct pt_regs *regs, char *path,
     return copy_vector(regs->rdx, strings, &strings->envc);
 }
 
+static int copy_kernel_vector(const char *const vector[],
+                              struct exec_strings *strings,
+                              unsigned int *count)
+{
+    *count = 0;
+    if (!vector)
+        return 0;
+    while (vector[*count]) {
+        const char *from = vector[*count];
+        unsigned long length = 0;
+
+        if (strings->count == EXEC_STRINGS)
+            return -E2BIG;
+        while (from[length]) {
+            if (strings->used + length == EXEC_STRING_BYTES)
+                return -E2BIG;
+            strings->data[strings->used + length] = from[length];
+            ++length;
+        }
+        if (strings->used + length == EXEC_STRING_BYTES)
+            return -E2BIG;
+        strings->data[strings->used + length] = 0;
+        strings->offset[strings->count] = strings->used;
+        strings->used += length + 1;
+        ++strings->count;
+        ++*count;
+    }
+    return 0;
+}
+
+static int copy_kernel_args(const char *const argv[],
+                            const char *const envp[],
+                            struct exec_strings *strings)
+{
+    int error;
+
+    strings->argc = 0;
+    strings->envc = 0;
+    strings->count = 0;
+    strings->used = 0;
+    error = copy_kernel_vector(argv, strings, &strings->argc);
+    if (error)
+        return error;
+    return copy_kernel_vector(envp, strings, &strings->envc);
+}
+
 static int read_exact(struct minix_fs *fs, const struct minix_inode *inode,
                       unsigned long offset, void *buffer,
                       unsigned long count)
@@ -335,37 +381,66 @@ void exec_init(struct minix_fs *fs)
     root_fs = fs;
 }
 
-long sys_execve(struct pt_regs *regs)
+static int prepare_exec(const char *path, const struct exec_strings *strings,
+                        unsigned long *pg_dir, unsigned long *entry,
+                        unsigned long *stack_pointer)
 {
-    struct exec_strings strings;
     struct exec_image image;
     struct minix_inode inode;
-    char path[EXEC_PATH_MAX];
-    unsigned long new_pg_dir;
-    unsigned long old_pg_dir;
-    unsigned long stack_pointer;
     int error;
 
     if (!root_fs)
         return -ENOENT;
-    error = copy_args(regs, path, &strings);
-    if (error)
-        return error;
     error = minix_lookup(root_fs, path, &inode);
     if (error)
         return error;
     error = read_image(root_fs, &inode, &image);
     if (error)
         return error;
-    error = load_image(root_fs, &inode, &image, &strings, &new_pg_dir,
-                       &stack_pointer);
+    error = load_image(root_fs, &inode, &image, strings, pg_dir,
+                       stack_pointer);
+    if (error)
+        return error;
+    *entry = image.ehdr.entry;
+    return 0;
+}
+
+int exec_load(const char *path, const char *const argv[],
+              const char *const envp[], unsigned long *pg_dir,
+              unsigned long *entry, unsigned long *stack_pointer)
+{
+    struct exec_strings strings;
+    int error;
+
+    if (!path || !pg_dir || !entry || !stack_pointer)
+        return -EINVAL;
+    error = copy_kernel_args(argv, envp, &strings);
+    if (error)
+        return error;
+    return prepare_exec(path, &strings, pg_dir, entry, stack_pointer);
+}
+
+long sys_execve(struct pt_regs *regs)
+{
+    struct exec_strings strings;
+    char path[EXEC_PATH_MAX];
+    unsigned long entry;
+    unsigned long new_pg_dir;
+    unsigned long old_pg_dir;
+    unsigned long stack_pointer;
+    int error;
+
+    error = copy_args(regs, path, &strings);
+    if (error)
+        return error;
+    error = prepare_exec(path, &strings, &new_pg_dir, &entry, &stack_pointer);
     if (error)
         return error;
 
     old_pg_dir = current->pg_dir;
     current->pg_dir = new_pg_dir;
     switch_pg_dir(new_pg_dir);
-    regs->rip = image.ehdr.entry;
+    regs->rip = entry;
     regs->rsp = stack_pointer;
     free_pg_dir(old_pg_dir);
     return 0;

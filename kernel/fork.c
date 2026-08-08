@@ -15,12 +15,36 @@
 #ifdef __x86_64__
 
 #include <asm/ptrace.h>
+#include <linux/exec.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
+
+#define USER_CS 0x23UL
+#define USER_DS 0x1bUL
+#define USER_RFLAGS 0x202UL
 
 extern void ret_from_system_call(void) __attribute__((visibility("hidden")));
 
 long last_pid __attribute__((visibility("hidden")));
+
+static void set_task_stack(struct task_struct *p, const struct pt_regs *regs)
+{
+	struct pt_regs *task_regs;
+	unsigned long *stack;
+
+	task_regs = (struct pt_regs *)(p->rsp0 - sizeof(*task_regs));
+	*task_regs = *regs;
+	task_regs->rax = 0;
+	stack = (unsigned long *)task_regs - 7;
+	stack[0] = regs->r15;
+	stack[1] = regs->r14;
+	stack[2] = regs->r13;
+	stack[3] = regs->r12;
+	stack[4] = regs->rbp;
+	stack[5] = regs->rbx;
+	stack[6] = (unsigned long)ret_from_system_call;
+	p->rsp = (unsigned long)stack;
+}
 
 int find_empty_process(void)
 {
@@ -41,8 +65,6 @@ repeat:
 static long copy_process(int nr, const struct pt_regs *regs)
 {
 	struct task_struct *p;
-	struct pt_regs *child_regs;
-	unsigned long *stack;
 	unsigned long page;
 	unsigned long pg_dir;
 
@@ -65,18 +87,7 @@ static long copy_process(int nr, const struct pt_regs *regs)
 	p->pg_dir = pg_dir;
 	p->rsp0 = (unsigned long)p + PAGE_SIZE;
 
-	child_regs = (struct pt_regs *)(p->rsp0 - sizeof(*child_regs));
-	*child_regs = *regs;
-	child_regs->rax = 0;
-	stack = (unsigned long *)child_regs - 7;
-	stack[0] = regs->r15;
-	stack[1] = regs->r14;
-	stack[2] = regs->r13;
-	stack[3] = regs->r12;
-	stack[4] = regs->rbp;
-	stack[5] = regs->rbx;
-	stack[6] = (unsigned long)ret_from_system_call;
-	p->rsp = (unsigned long)stack;
+	set_task_stack(p, regs);
 
 	task[nr] = p;
 	p->state = TASK_RUNNING;
@@ -91,6 +102,55 @@ long sys_fork(const struct pt_regs *regs)
 	if (nr < 0)
 		return nr;
 	return copy_process(nr, regs);
+}
+
+long create_init(const char *path, const char *const argv[],
+		 const char *const envp[])
+{
+	struct task_struct *p;
+	struct pt_regs regs = { 0 };
+	unsigned long entry;
+	unsigned long page;
+	unsigned long pg_dir;
+	unsigned long user_rsp;
+	int error;
+	int nr;
+
+	if (last_pid != 0)
+		return -EAGAIN;
+	nr = find_empty_process();
+	if (nr < 0)
+		return nr;
+	page = get_free_page();
+	if (!page) {
+		last_pid = 0;
+		return -EAGAIN;
+	}
+	error = exec_load(path, argv, envp, &pg_dir, &entry, &user_rsp);
+	if (error) {
+		free_page(page);
+		last_pid = 0;
+		return error;
+	}
+
+	p = phys_to_virt(page);
+	*p = *current;
+	p->state = TASK_UNINTERRUPTIBLE;
+	p->signal = 0;
+	p->pid = 1;
+	p->father = 0;
+	p->counter = p->priority;
+	p->pg_dir = pg_dir;
+	p->rsp0 = (unsigned long)p + PAGE_SIZE;
+	regs.rip = entry;
+	regs.cs = USER_CS;
+	regs.rflags = USER_RFLAGS;
+	regs.rsp = user_rsp;
+	regs.ss = USER_DS;
+	set_task_stack(p, &regs);
+	task[nr] = p;
+	p->state = TASK_RUNNING;
+	return 1;
 }
 
 #else

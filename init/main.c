@@ -6,6 +6,7 @@
 #include <linux/minix.h>
 #include <linux/mm.h>
 #include <linux/ramdisk.h>
+#include <linux/sched.h>
 
 #define RAMDISK_SIZE (64UL * MINIX_BLOCK_SIZE)
 
@@ -16,6 +17,8 @@ static struct minix_fs root_fs;
 void __attribute__((noreturn))
 x86_64_kernel_main(const struct boot_info *boot_info)
 {
+    const char *init_argv[] = { "init", "stage6", 0 };
+    const char *init_envp[] = { "PORT=exec", 0 };
     struct minix_inode init_inode;
     unsigned long free;
 
@@ -59,8 +62,9 @@ x86_64_kernel_main(const struct boot_info *boot_info)
     serial_write("Minix root mounted; /bin/init bytes: ");
     serial_write_uint64(init_inode.size);
     serial_write("\r\n");
-
-    for (;;) {
-        __asm__ volatile ("hlt");
-    }
+    if (create_init("/bin/init", init_argv, init_envp) != 1)
+        panic("cannot create init");
+    serial_write("PID 1 created from /bin/init\r\n");
+    schedule();
+    panic("init returned control");
 }

@@ -30,6 +30,7 @@ extern char process_user_end[] __attribute__((visibility("hidden")));
 
 extern long sys_fork(const struct pt_regs *regs);
 extern long sys_waitpid(const struct pt_regs *regs);
+extern long last_pid __attribute__((visibility("hidden")));
 
 static unsigned long initial_free;
 static unsigned long held_pages[MAX_HELD_PAGES];
@@ -326,6 +327,7 @@ x86_64_kernel_main(const struct boot_info *boot_info)
 {
     serial_write("PROCESS TEST START\r\n");
     mem_init(boot_info->mem_start, boot_info->mem_end);
+    last_pid = 1;
     initial_free = nr_free_pages();
     prepare_user_space();
 

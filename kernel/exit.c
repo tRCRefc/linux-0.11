@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 
 #include <asm/ptrace.h>
+#include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
 
@@ -27,6 +28,8 @@ static void tell_father(long pid)
 
 long do_exit(long code)
 {
+	if (current->pid == 1)
+		panic(code ? "init failed" : "init exited");
 	free_user_pages(current->pg_dir);
 	current->state = TASK_ZOMBIE;
 	current->exit_code = code;
