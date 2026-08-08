@@ -14,6 +14,7 @@
 	.globl process_user_oom
 	.globl process_user_exit
 	.globl process_user_nested
+	.globl process_user_orphan
 	.globl process_user_end
 process_user_start:
 process_user_anon:
@@ -70,6 +71,18 @@ process_user_nested:
 	jmp 3f
 2:	movl $1, %ebx
 3:	movl $__NR_exit, %eax
+	int $0x80
+
+	.balign 16
+process_user_orphan:
+	movl $__NR_fork, %eax
+	int $0x80
+	testq %rax, %rax
+	jz 4f
+	xorl %ebx, %ebx
+	jmp 5f
+4:	movl $7, %ebx
+5:	movl $__NR_exit, %eax
 	int $0x80
 process_user_end:
 	ud2

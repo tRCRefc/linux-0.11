@@ -26,10 +26,24 @@ static void tell_father(long pid)
 	}
 }
 
+static void reparent_children(void)
+{
+	int i;
+
+	for (i = 1; i < NR_TASKS; ++i) {
+		if (!task[i] || task[i]->father != current->pid)
+			continue;
+		task[i]->father = 1;
+		if (task[i]->state == TASK_ZOMBIE)
+			tell_father(1);
+	}
+}
+
 long do_exit(long code)
 {
 	if (current->pid == 1)
 		panic(code ? "init failed" : "init exited");
+	reparent_children();
 	free_user_pages(current->pg_dir);
 	current->state = TASK_ZOMBIE;
 	current->exit_code = code;

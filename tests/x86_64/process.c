@@ -26,6 +26,7 @@ extern char process_user_fault[] __attribute__((visibility("hidden")));
 extern char process_user_oom[] __attribute__((visibility("hidden")));
 extern char process_user_exit[] __attribute__((visibility("hidden")));
 extern char process_user_nested[] __attribute__((visibility("hidden")));
+extern char process_user_orphan[] __attribute__((visibility("hidden")));
 extern char process_user_end[] __attribute__((visibility("hidden")));
 
 extern long sys_fork(const struct pt_regs *regs);
@@ -295,6 +296,48 @@ static void test_nested_wait(void)
     pass("nested wait");
 }
 
+static void test_orphan_reparent(void)
+{
+    struct pt_regs regs = { 0 };
+    struct task_struct *child;
+    volatile unsigned int *status;
+    unsigned long free;
+    long parent_pid;
+    long result;
+
+    free = nr_free_pages();
+    current->pid = 1;
+    parent_pid = fork_user(process_user_orphan);
+    if (parent_pid < 2)
+        fail("orphan parent fork failed");
+    schedule();
+    if (current != task[0])
+        fail("init controller was not restored");
+    if (child_tasks() != 2)
+        fail("orphan tasks did not both exit");
+    check_zombie(parent_pid, 0);
+    check_zombie(parent_pid + 1, 7 << 8);
+    child = find_task(parent_pid + 1);
+    if (!child || child->father != 1)
+        fail("orphan was not reparented to init");
+    if (!(current->signal & (1L << (SIGCHLD - 1))))
+        fail("orphan did not notify init");
+
+    status = (volatile unsigned int *)(USER_DATA + 8);
+    regs.rbx = (unsigned long)-1;
+    regs.rcx = (unsigned long)status;
+    result = sys_waitpid(&regs);
+    if (result != parent_pid + 1 || *status != (7U << 8))
+        fail("init did not reap orphan");
+    result = sys_waitpid(&regs);
+    if (result != parent_pid || *status != 0)
+        fail("init did not reap parent");
+    current->pid = 0;
+    if (nr_free_pages() != free)
+        fail("orphan reaping leaked pages");
+    pass("orphan reparent");
+}
+
 static void test_repeated_lifecycle(void)
 {
     unsigned long free;
@@ -337,6 +380,7 @@ x86_64_kernel_main(const struct boot_info *boot_info)
     test_user_oom();
     test_fork_rollback();
     test_nested_wait();
+    test_orphan_reparent();
     test_repeated_lifecycle();
 
     free_user_pages(current->pg_dir);

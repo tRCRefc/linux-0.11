@@ -2,6 +2,7 @@
 	.equ __NR_fork, 2
 	.equ __NR_waitpid, 7
 	.equ __NR_getpid, 20
+	.equ ECHILD, 10
 
 	.text
 	.globl _start
@@ -83,7 +84,17 @@ _start:
 	xorl %ebx, %ebx
 	jmp 3f
 #else
-4:	movl $__NR_getpid, %eax
+
+4:	movq $-1, %rbx
+	leaq child_status(%rip), %rcx
+	xorl %edx, %edx
+	movl $__NR_waitpid, %eax
+	int $0x80
+	testq %rax, %rax
+	jns 4b
+	cmpq $-ECHILD, %rax
+	jne 1f
+	movl $__NR_getpid, %eax
 	int $0x80
 	cmpq $1, %rax
 	jne 1f
