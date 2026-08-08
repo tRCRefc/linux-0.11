@@ -27,6 +27,8 @@ extern void free_pg_dir(unsigned long pg_dir);
 extern unsigned long switch_pg_dir(unsigned long pg_dir);
 extern unsigned long put_user_page(unsigned long pg_dir, unsigned long page,
                                    unsigned long address);
+extern int resolve_user_addr(unsigned long pg_dir, unsigned long address,
+                             unsigned long *physical);
 extern unsigned long put_page(unsigned long page,unsigned long address);
 extern void free_page(unsigned long addr);
 extern void get_empty_page(unsigned long addr);

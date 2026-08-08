@@ -37,12 +37,11 @@ static int same(const char *left, const char *right, unsigned long length)
 void __attribute__((noreturn))
 x86_64_kernel_main(const struct boot_info *boot_info)
 {
-    static const char expected[] = "minix init image\n";
     struct hard_disk disk;
     struct minix_inode inode;
     struct minix_fs fs;
     struct ramdisk rd;
-    char data[sizeof(expected)];
+    unsigned char data[4];
     long bytes;
 
     serial_write("FS TEST START\r\n");
@@ -64,8 +63,8 @@ x86_64_kernel_main(const struct boot_info *boot_info)
     if (minix_lookup(&fs, "/bin/init", &inode))
         fail("lookup /bin/init");
     bytes = minix_read(&fs, &inode, 0, data, sizeof(data));
-    if (bytes != (long)sizeof(expected) - 1 ||
-        !same(data, expected, sizeof(expected) - 1))
+    if (bytes != (long)sizeof(data) ||
+        !same((char *)data, "\177ELF", sizeof(data)))
         fail("read /bin/init");
     serial_write("FS PASS: read /bin/init\r\n");
     serial_write("FS TEST COMPLETE\r\n");

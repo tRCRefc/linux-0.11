@@ -1,6 +1,7 @@
 #include <asm/boot.h>
 #include <asm/serial.h>
 #include <linux/hd.h>
+#include <linux/exec.h>
 #include <linux/kernel.h>
 #include <linux/minix.h>
 #include <linux/mm.h>
@@ -52,6 +53,7 @@ x86_64_kernel_main(const struct boot_info *boot_info)
     serial_write("\r\n");
     if (minix_mount(&root_fs, rd_read, &root_ramdisk))
         panic("cannot mount Minix root");
+    exec_init(&root_fs);
     if (minix_lookup(&root_fs, "/bin/init", &init_inode))
         panic("cannot find /bin/init");
     serial_write("Minix root mounted; /bin/init bytes: ");

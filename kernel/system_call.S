@@ -71,7 +71,11 @@ sys_call_table:
 	.long 0
 	.endr
 	.long sys_waitpid - .
-	.rept NR_SYSTEM_CALLS - 9
+	.rept 3
+	.long 0
+	.endr
+	.long sys_execve - .
+	.rept NR_SYSTEM_CALLS - 13
 	.long 0
 	.endr
 	.long sys_getpid - .

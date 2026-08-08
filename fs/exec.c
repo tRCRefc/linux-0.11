@@ -1,3 +1,378 @@
+#ifdef __x86_64__
+
+#include <errno.h>
+
+#include <asm/ptrace.h>
+#include <linux/elf.h>
+#include <linux/exec.h>
+#include <linux/minix.h>
+#include <linux/mm.h>
+#include <linux/sched.h>
+
+#define EXEC_PATH_MAX 64
+#define EXEC_STRINGS 16
+#define EXEC_STRING_BYTES 512
+#define EXEC_PHDRS 8
+#define EXEC_STACK_BOTTOM (USER_ADDRESS_LIMIT - PAGE_SIZE)
+
+struct exec_strings {
+    char data[EXEC_STRING_BYTES];
+    unsigned short offset[EXEC_STRINGS];
+    unsigned int argc;
+    unsigned int envc;
+    unsigned int count;
+    unsigned int used;
+};
+
+struct exec_image {
+    struct elf64_ehdr ehdr;
+    struct elf64_phdr phdr[EXEC_PHDRS];
+    unsigned int loads;
+};
+
+static struct minix_fs *root_fs;
+
+static int add_overflow(unsigned long left, unsigned long right,
+                        unsigned long *sum)
+{
+    *sum = left + right;
+    return *sum < left;
+}
+
+static int copy_user(void *buffer, unsigned long address, unsigned long count)
+{
+    unsigned char *to = buffer;
+
+    while (count-- > 0) {
+        unsigned long physical;
+
+        if (!resolve_user_addr(current->pg_dir, address, &physical))
+            return -EFAULT;
+        *to++ = *(unsigned char *)phys_to_virt(physical);
+        ++address;
+    }
+    return 0;
+}
+
+static int copy_user_string(unsigned long address, char *buffer,
+                            unsigned long limit, unsigned long *length)
+{
+    unsigned long i;
+
+    if (!address)
+        return -EFAULT;
+    for (i = 0; i < limit; ++i) {
+        int error = copy_user(buffer + i, address + i, 1);
+
+        if (error)
+            return error;
+        if (!buffer[i]) {
+            *length = i + 1;
+            return 0;
+        }
+    }
+    return -E2BIG;
+}
+
+static int copy_vector(unsigned long vector, struct exec_strings *strings,
+                       unsigned int *count)
+{
+    *count = 0;
+    if (!vector)
+        return 0;
+    for (;;) {
+        unsigned long address;
+        unsigned long length;
+        int error;
+
+        error = copy_user(&address,
+                          vector + *count * sizeof(address),
+                          sizeof(address));
+        if (error)
+            return error;
+        if (!address)
+            return 0;
+        if (strings->count == EXEC_STRINGS)
+            return -E2BIG;
+        error = copy_user_string(address, strings->data + strings->used,
+                                 EXEC_STRING_BYTES - strings->used, &length);
+        if (error)
+            return error;
+        strings->offset[strings->count] = strings->used;
+        strings->used += length;
+        ++strings->count;
+        ++*count;
+    }
+}
+
+static int copy_args(const struct pt_regs *regs, char *path,
+                     struct exec_strings *strings)
+{
+    unsigned long length;
+    int error;
+
+    strings->argc = 0;
+    strings->envc = 0;
+    strings->count = 0;
+    strings->used = 0;
+    error = copy_user_string(regs->rbx, path, EXEC_PATH_MAX, &length);
+    if (error)
+        return error;
+    error = copy_vector(regs->rcx, strings, &strings->argc);
+    if (error)
+        return error;
+    return copy_vector(regs->rdx, strings, &strings->envc);
+}
+
+static int read_exact(struct minix_fs *fs, const struct minix_inode *inode,
+                      unsigned long offset, void *buffer,
+                      unsigned long count)
+{
+    long bytes = minix_read(fs, inode, offset, buffer, count);
+
+    if (bytes < 0)
+        return (int)bytes;
+    return bytes == (long)count ? 0 : -ENOEXEC;
+}
+
+static int read_image(struct minix_fs *fs, const struct minix_inode *inode,
+                      struct exec_image *image)
+{
+    unsigned long phend;
+    unsigned int i;
+    int entry_found = 0;
+    int error;
+
+    error = read_exact(fs, inode, 0, &image->ehdr, sizeof(image->ehdr));
+    if (error)
+        return error;
+    if (image->ehdr.ident[0] != 0x7f || image->ehdr.ident[1] != 'E' ||
+        image->ehdr.ident[2] != 'L' || image->ehdr.ident[3] != 'F' ||
+        image->ehdr.ident[4] != ELFCLASS64 ||
+        image->ehdr.ident[5] != ELFDATA2LSB ||
+        image->ehdr.ident[6] != EV_CURRENT ||
+        image->ehdr.type != ET_EXEC || image->ehdr.machine != EM_X86_64 ||
+        image->ehdr.version != EV_CURRENT ||
+        image->ehdr.ehsize != sizeof(image->ehdr) ||
+        image->ehdr.phentsize != sizeof(struct elf64_phdr) ||
+        !image->ehdr.phnum || image->ehdr.phnum > EXEC_PHDRS)
+        return -ENOEXEC;
+    if (image->ehdr.phoff > inode->size ||
+        image->ehdr.phnum > (inode->size - image->ehdr.phoff) /
+                            sizeof(struct elf64_phdr))
+        return -ENOEXEC;
+    phend = image->ehdr.phoff +
+            image->ehdr.phnum * sizeof(struct elf64_phdr);
+    if (phend > inode->size)
+        return -ENOEXEC;
+    error = read_exact(fs, inode, image->ehdr.phoff, image->phdr,
+                       image->ehdr.phnum * sizeof(struct elf64_phdr));
+    if (error)
+        return error;
+
+    image->loads = 0;
+    for (i = 0; i < image->ehdr.phnum; ++i) {
+        struct elf64_phdr *ph = &image->phdr[i];
+        unsigned long file_end;
+        unsigned long mem_end;
+        unsigned int j;
+
+        if (ph->type != PT_LOAD || !ph->memsz || ph->filesz > ph->memsz ||
+            ph->align != PAGE_SIZE ||
+            (ph->offset & (PAGE_SIZE - 1)) ||
+            (ph->vaddr & (PAGE_SIZE - 1)) ||
+            !(ph->flags & PF_R) || (ph->flags & ~(PF_R | PF_W | PF_X)) ||
+            add_overflow(ph->offset, ph->filesz, &file_end) ||
+            file_end > inode->size ||
+            add_overflow(ph->vaddr, ph->memsz, &mem_end) ||
+            ph->vaddr < USER_ADDRESS_START || mem_end > EXEC_STACK_BOTTOM)
+            return -ENOEXEC;
+        for (j = 0; j < i; ++j) {
+            unsigned long other_end = image->phdr[j].vaddr +
+                                      image->phdr[j].memsz;
+
+            if (ph->vaddr < other_end && image->phdr[j].vaddr < mem_end)
+                return -ENOEXEC;
+        }
+        if ((ph->flags & PF_X) && image->ehdr.entry >= ph->vaddr &&
+            image->ehdr.entry < mem_end)
+            entry_found = 1;
+        ++image->loads;
+    }
+    return entry_found && image->loads ? 0 : -ENOEXEC;
+}
+
+static int map_page(unsigned long pg_dir, unsigned long address,
+                    unsigned long *physical)
+{
+    unsigned long page = get_free_page();
+
+    if (!page)
+        return -ENOMEM;
+    if (!put_user_page(pg_dir, page, address)) {
+        free_page(page);
+        return -ENOMEM;
+    }
+    *physical = page;
+    return 0;
+}
+
+static int load_segment(struct minix_fs *fs, const struct minix_inode *inode,
+                        unsigned long pg_dir, const struct elf64_phdr *ph)
+{
+    unsigned long loaded = 0;
+
+    while (loaded < ph->memsz) {
+        unsigned long physical;
+        unsigned long bytes = ph->filesz - loaded;
+        int error;
+
+        if (bytes > PAGE_SIZE)
+            bytes = PAGE_SIZE;
+        if (loaded >= ph->filesz)
+            bytes = 0;
+        error = map_page(pg_dir, ph->vaddr + loaded, &physical);
+        if (error)
+            return error;
+        if (bytes) {
+            error = read_exact(fs, inode, ph->offset + loaded,
+                               phys_to_virt(physical), bytes);
+            if (error)
+                return error;
+        }
+        loaded += PAGE_SIZE;
+    }
+    return 0;
+}
+
+static int write_user(unsigned long pg_dir, unsigned long address,
+                      const void *buffer, unsigned long count)
+{
+    const unsigned char *from = buffer;
+
+    while (count-- > 0) {
+        unsigned long physical;
+
+        if (!resolve_user_addr(pg_dir, address, &physical))
+            return -ENOMEM;
+        *(unsigned char *)phys_to_virt(physical) = *from++;
+        ++address;
+    }
+    return 0;
+}
+
+static int build_stack(unsigned long pg_dir, const struct exec_strings *strings,
+                       unsigned long *stack_pointer)
+{
+    unsigned long pointers[EXEC_STRINGS];
+    unsigned long frame[1 + EXEC_STRINGS + 1 + EXEC_STRINGS + 1];
+    unsigned long string_base;
+    unsigned long rsp;
+    unsigned int frame_words;
+    unsigned int i;
+    int error;
+
+    error = map_page(pg_dir, EXEC_STACK_BOTTOM, &rsp);
+    if (error)
+        return error;
+    string_base = USER_ADDRESS_LIMIT - strings->used;
+    string_base &= ~7UL;
+    if (string_base < EXEC_STACK_BOTTOM + sizeof(frame))
+        return -E2BIG;
+    error = write_user(pg_dir, string_base, strings->data, strings->used);
+    if (error)
+        return error;
+    for (i = 0; i < strings->count; ++i)
+        pointers[i] = string_base + strings->offset[i];
+
+    frame_words = 0;
+    frame[frame_words++] = strings->argc;
+    for (i = 0; i < strings->argc; ++i)
+        frame[frame_words++] = pointers[i];
+    frame[frame_words++] = 0;
+    for (i = 0; i < strings->envc; ++i)
+        frame[frame_words++] = pointers[strings->argc + i];
+    frame[frame_words++] = 0;
+    rsp = string_base - frame_words * sizeof(unsigned long);
+    rsp &= ~15UL;
+    error = write_user(pg_dir, rsp, frame,
+                       frame_words * sizeof(unsigned long));
+    if (error)
+        return error;
+    *stack_pointer = rsp;
+    return 0;
+}
+
+static int load_image(struct minix_fs *fs, const struct minix_inode *inode,
+                      const struct exec_image *image,
+                      const struct exec_strings *strings,
+                      unsigned long *pg_dir, unsigned long *stack_pointer)
+{
+    unsigned int i;
+    int error;
+
+    *pg_dir = new_pg_dir();
+    if (!*pg_dir)
+        return -ENOMEM;
+    for (i = 0; i < image->ehdr.phnum; ++i) {
+        error = load_segment(fs, inode, *pg_dir, &image->phdr[i]);
+        if (error)
+            goto failed;
+    }
+    error = build_stack(*pg_dir, strings, stack_pointer);
+    if (error)
+        goto failed;
+    return 0;
+
+failed:
+    free_pg_dir(*pg_dir);
+    *pg_dir = 0;
+    return error;
+}
+
+void exec_init(struct minix_fs *fs)
+{
+    root_fs = fs;
+}
+
+long sys_execve(struct pt_regs *regs)
+{
+    struct exec_strings strings;
+    struct exec_image image;
+    struct minix_inode inode;
+    char path[EXEC_PATH_MAX];
+    unsigned long new_pg_dir;
+    unsigned long old_pg_dir;
+    unsigned long stack_pointer;
+    int error;
+
+    if (!root_fs)
+        return -ENOENT;
+    error = copy_args(regs, path, &strings);
+    if (error)
+        return error;
+    error = minix_lookup(root_fs, path, &inode);
+    if (error)
+        return error;
+    error = read_image(root_fs, &inode, &image);
+    if (error)
+        return error;
+    error = load_image(root_fs, &inode, &image, &strings, &new_pg_dir,
+                       &stack_pointer);
+    if (error)
+        return error;
+
+    old_pg_dir = current->pg_dir;
+    current->pg_dir = new_pg_dir;
+    switch_pg_dir(new_pg_dir);
+    regs->rip = image.ehdr.entry;
+    regs->rsp = stack_pointer;
+    free_pg_dir(old_pg_dir);
+    return 0;
+}
+
+#else
+
 /*
  *  linux/fs/exec.c
  *
@@ -567,3 +942,5 @@ exec_error1:
 		free_page(page[i]);
 	return(retval);
 }
+
+#endif

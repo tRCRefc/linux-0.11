@@ -475,9 +475,9 @@ no_memory:
     return 0;
 }
 
-int resolve_addr(unsigned long va, unsigned long *pa)
+static int resolve_pg_addr(unsigned long pg_dir, unsigned long va,
+                           unsigned long *pa)
 {
-    unsigned long cr3;
     unsigned long *pml4;
     unsigned long *pdpt;
     unsigned long *pd;
@@ -487,9 +487,7 @@ int resolve_addr(unsigned long va, unsigned long *pa)
     unsigned long pde;
     unsigned long pte;
 
-    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
-
-    pml4 = phys_to_virt(cr3 & PAGE_TABLE_ADDR_MASK);
+    pml4 = phys_to_virt(pg_dir & PAGE_TABLE_ADDR_MASK);
     pml4e = pml4[(va >> 39) & 0x1ffUL];
     if (!(pml4e & PAGE_PRESENT)) return 0;
 
@@ -512,6 +510,22 @@ int resolve_addr(unsigned long va, unsigned long *pa)
         *pa = ((pte & PAGE_TABLE_ADDR_MASK) | (va & (PAGE_SIZE - 1UL)));
         return 1;
     }
+}
+
+int resolve_user_addr(unsigned long pg_dir, unsigned long va,
+                      unsigned long *pa)
+{
+    if (va < USER_ADDRESS_START || va >= USER_ADDRESS_LIMIT)
+        return 0;
+    return resolve_pg_addr(pg_dir, va, pa);
+}
+
+int resolve_addr(unsigned long va, unsigned long *pa)
+{
+    unsigned long cr3;
+
+    __asm__ volatile ("movq %%cr3, %0" : "=r" (cr3));
+    return resolve_pg_addr(cr3, va, pa);
 }
 
 int split_large_page(unsigned long va)
